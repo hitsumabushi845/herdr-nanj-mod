@@ -3,8 +3,8 @@
 import { agentNames } from "./names.js";
 import { screenKey } from "./screen.js";
 import { canCall, record } from "./budget.js";
-import { initialState, observe, pick, commit, drop, wantsRotate, clearRotate, workingSince } from "./triggers.js";
-import { newThread, append, isFull, serialize, deserialize } from "./thread.js";
+import { initialState, observe, pick, commit, drop, workingSince } from "./triggers.js";
+import { newThread, append, nextNo, serialize, deserialize } from "./thread.js";
 import { SYSTEM_PROMPT, RECENT_MAX, buildUserPrompt, parseResponse } from "./prompt.js";
 
 /** @typedef {import("./config.js").Config} Config */
@@ -102,7 +102,7 @@ export function createEngine(deps) {
       }
     },
 
-    /** 手動の次スレ。 */
+    /** 手動の次スレ。スレッドが替わるのは、利用者がこれを選んだときだけ。 */
     async rotate(now) {
       engine.thread = newThread(now);
       await persist();
@@ -151,14 +151,6 @@ export function createEngine(deps) {
     }
     state = observe(state, obs, now);
 
-    if (wantsRotate(state) || isFull(engine.thread)) {
-      state = clearRotate(state);
-      if (engine.thread.posts.length > 0) {
-        engine.thread = newThread(now);
-        await persist();
-      }
-    }
-
     const trigger = pick(state, now, cfg);
     if (!trigger || !canCall(calls, trigger.kind, now, cfg.max_calls_per_hour)) return;
 
@@ -184,7 +176,7 @@ export function createEngine(deps) {
       kind: trigger.kind, agent, screen,
       recent: engine.thread.posts.slice(-RECENT_MAX),
       needTitle: engine.thread.title === null,
-      nextNo: engine.thread.posts.length + 1,
+      nextNo: nextNo(engine.thread),
     });
     calls = record(calls, now);
     state = commit(state, trigger, now);

@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { DEFAULTS } from "../mods/nanj/config.js";
 import {
-  initialState, observe, pick, commit, drop, wantsRotate, clearRotate, workingSince,
-  WAIT_FIRST_MS, ROTATE_IDLE_MS,
+  initialState, observe, pick, commit, drop, workingSince,
+  WAIT_FIRST_MS,
 } from "../mods/nanj/triggers.js";
 
 const cfg = { ...DEFAULTS };
@@ -132,23 +132,12 @@ describe("雑談", () => {
   });
 });
 
-describe("次スレ", () => {
-  it("作業中なしが 30 分続いたあとに作業中が現れると立て直す", () => {
-    expect(ROTATE_IDLE_MS).toBe(1800000);
-    let s = observe(initialState(), [st("t1", "idle")], 0);
-    s = observe(s, [st("t1", "idle")], 1799000);
-    expect(wantsRotate(s)).toBe(false);
-    s = observe(s, [w("t1", "k1")], 1800000);
-    expect(wantsRotate(s)).toBe(true);
-    expect(wantsRotate(clearRotate(s))).toBe(false);
-  });
-  it("30 分未満の空きでは立て直さない", () => {
-    let s = observe(initialState(), [st("t1", "idle")], 0);
-    s = observe(s, [w("t1", "k1")], 1799000);
-    expect(wantsRotate(s)).toBe(false);
-  });
-  it("起動してすぐ作業中を見ても立て直さない", () => {
-    expect(wantsRotate(observe(initialState(), [w("t1", "k1")], 0))).toBe(false);
+describe("スレッドの切り替え", () => {
+  it("きっかけの状態は、スレッドの立て直しを求める関数を持たない", async () => {
+    const mod = await import("../mods/nanj/triggers.js");
+    expect(mod.wantsRotate).toBeUndefined();
+    expect(mod.clearRotate).toBeUndefined();
+    expect(mod.ROTATE_IDLE_MS).toBeUndefined();
   });
 });
 

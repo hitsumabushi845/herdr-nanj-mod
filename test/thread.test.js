@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { YAJIUMA_NAME } from "../mods/nanj/names.js";
 import {
-  newThread, append, isFull, stamp, shortStamp, segments, serialize, deserialize, MAX_POSTS, COLOR_SLOTS,
+  newThread, append, nextNo, stamp, shortStamp, segments, serialize, deserialize, MAX_POSTS, COLOR_SLOTS,
 } from "../mods/nanj/thread.js";
 
 const api = { address: "t17", name: "api" };
@@ -34,15 +34,22 @@ describe("append", () => {
     const t = append(newThread(0), [{ who: "agent", body: "c" }], null, 7, zero);
     expect(t.posts[0]).toMatchObject({ name: YAJIUMA_NAME, agent: null });
   });
-  it("1000 レスを超える分は足さない", () => {
+  it("1000 レスを超えたら古いレスから落とし、番号は続ける", () => {
     expect(MAX_POSTS).toBe(1000);
-    let full = newThread(0);
-    for (let i = 0; i < 999; i++) full = append(full, [{ who: "yajiuma", body: "x" }], null, i, zero);
-    expect(isFull(full)).toBe(false);
-    full = append(full, [{ who: "yajiuma", body: "y" }, { who: "yajiuma", body: "z" }], null, 1000, zero);
-    expect(full.posts.length).toBe(1000);
-    expect(full.posts.at(-1).body).toBe("y");
-    expect(isFull(full)).toBe(true);
+    let t = newThread(0);
+    for (let i = 0; i < 999; i++) t = append(t, [{ who: "yajiuma", body: "x" }], null, i, zero);
+    t = append(t, [{ who: "yajiuma", body: "y" }, { who: "yajiuma", body: "z" }], null, 1000, zero);
+    expect(t.posts.length).toBe(1000);
+    expect(t.posts[0].no).toBe(2);
+    expect(t.posts.at(-2)).toMatchObject({ no: 1000, body: "y" });
+    expect(t.posts.at(-1)).toMatchObject({ no: 1001, body: "z" });
+    t = append(t, [{ who: "agent", body: "次" }], api, 1001, zero);
+    expect(t.posts.at(-1).no).toBe(1002);
+    expect(t.posts[0].no).toBe(3);
+  });
+  it("nextNo は次に付く番号を返す", () => {
+    expect(nextNo(newThread(0))).toBe(1);
+    expect(nextNo(append(newThread(0), [{ who: "yajiuma", body: "x" }], null, 1, zero))).toBe(2);
   });
   it("元のスレッドを変えない", () => {
     const t0 = newThread(0);

@@ -19,16 +19,13 @@
  * @property {Record<string, Rec>} agents
  * @property {Trigger[]} queue 完了と入力待ちの待ち行列
  * @property {number | null} lastChatAt
- * @property {number | null} idleSince 作業中の Agent がなくなった時刻
- * @property {boolean} rotate
  */
 
 export const WAIT_FIRST_MS = 180000;
-export const ROTATE_IDLE_MS = 1800000;
 
 /** @returns {State} */
 export function initialState() {
-  return { agents: {}, queue: [], lastChatAt: null, idleSince: null, rotate: false };
+  return { agents: {}, queue: [], lastChatAt: null };
 }
 
 const sameTrigger = (a, b) => a.kind === b.kind && a.address === b.address;
@@ -77,15 +74,7 @@ export function observe(state, obs, now) {
   }
   queue = queue.filter((t) => t.address === null || t.address in agents);
 
-  const anyWorking = obs.some((o) => o.status === "working");
-  let { idleSince, rotate } = state;
-  if (anyWorking) {
-    if (idleSince !== null && now - idleSince >= ROTATE_IDLE_MS) rotate = true;
-    idleSince = null;
-  } else if (idleSince === null) {
-    idleSince = now;
-  }
-  return { agents, queue, lastChatAt: state.lastChatAt ?? now, idleSince, rotate };
+  return { agents, queue, lastChatAt: state.lastChatAt ?? now };
 }
 
 /**
@@ -151,16 +140,6 @@ export function commit(state, trigger, now) {
  */
 export function drop(state, trigger) {
   return { ...state, queue: state.queue.filter((t) => !sameTrigger(t, trigger)) };
-}
-
-/** @param {State} state */
-export function wantsRotate(state) {
-  return state.rotate;
-}
-
-/** @param {State} state @returns {State} */
-export function clearRotate(state) {
-  return { ...state, rotate: false };
 }
 
 /**

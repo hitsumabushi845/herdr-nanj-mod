@@ -13,8 +13,14 @@ export function newThread(now) {
   return { v: 1, title: null, startedAt: now, posts: [], colors: {} };
 }
 
+/** 次に付くレスの番号。古いレスを落としたあとも番号は続く。 @param {Thread} thread */
+export function nextNo(thread) {
+  return thread.posts.length === 0 ? 1 : thread.posts[thread.posts.length - 1].no + 1;
+}
+
 /**
  * レスを足す。agent が null のとき（雑談）は、すべて野次馬のレスにする。
+ * スレッドは 1 本のまま続く。MAX_POSTS を超えたら古いレスから落とし、番号は続ける。
  * @param {Thread} thread
  * @param {{who: "agent" | "yajiuma", body: string}[]} entries
  * @param {{address: string, name: string} | null} agent
@@ -25,12 +31,12 @@ export function newThread(now) {
 export function append(thread, entries, agent, now, rand) {
   const posts = [...thread.posts];
   const colors = { ...thread.colors };
+  let no = nextNo(thread);
   for (const e of entries) {
-    if (posts.length >= MAX_POSTS) break;
     const own = e.who === "agent" && agent !== null;
     if (own && !(agent.address in colors)) colors[agent.address] = Object.keys(colors).length % COLOR_SLOTS;
     posts.push({
-      no: posts.length + 1,
+      no: no++,
       name: own ? agent.name : YAJIUMA_NAME,
       id: own ? agent.address : yajiumaId(rand),
       agent: own ? agent.address : null,
@@ -38,12 +44,7 @@ export function append(thread, entries, agent, now, rand) {
       body: e.body,
     });
   }
-  return { ...thread, posts, colors };
-}
-
-/** @param {Thread} thread */
-export function isFull(thread) {
-  return thread.posts.length >= MAX_POSTS;
+  return { ...thread, posts: posts.slice(-MAX_POSTS), colors };
 }
 
 const p2 = (n) => String(n).padStart(2, "0");

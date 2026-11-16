@@ -230,30 +230,31 @@ describe("失敗", () => {
   });
 });
 
-describe("スレッドの立て直し", () => {
-  it("1000 レスのスレッドは次の tick で新しくなる", async () => {
-    let full = { ...newThread(0), title: "前スレ" };
+describe("スレッドは 1 本", () => {
+  it("1000 レスに達しても同じスレッドに続けて書き、番号を続ける", async () => {
+    let full = { ...newThread(0), title: "ずっと続くスレ" };
     for (let i = 0; i < 1000; i++) full = append(full, [{ who: "yajiuma", body: "x" }], null, i, () => 0);
-    const { e } = await started({ stored: serialize(full) });
-    expect(e.thread.posts.length).toBe(1000);
+    const { f, e } = await started({ stored: serialize(full) });
     await e.tick(5000);
-    expect(e.thread.posts.length).toBe(1);
-    expect(e.thread.title).toBe("【実況】api スレ");
-    expect(e.thread.startedAt).toBe(5000);
+    expect(e.thread.title).toBe("ずっと続くスレ");
+    expect(e.thread.startedAt).toBe(0);
+    expect(e.thread.posts.length).toBe(1000);
+    expect(e.thread.posts.at(-1)).toMatchObject({ no: 1001, name: "api" });
+    expect(f.log.generate[0].user).toContain("次のレスは 1001 番");
   });
 
-  it("作業中なしが 30 分続いたあとで作業が始まると新しくなる", async () => {
+  it("作業中なしが長く続いたあとで作業が始まっても、同じスレッドに続けて書く", async () => {
     const { f, e } = await started();
     await e.tick(0);
     f.agents = [agent("t1", "idle")];
     await e.tick(30000);
-    expect(e.thread.posts.length).toBe(2);
     await e.tick(60000);
     f.agents = [agent("t1", "working")];
     f.screens.t1 = "翌日の作業";
-    await e.tick(30000 + 1800000);
-    expect(e.thread.posts.length).toBe(1);
-    expect(e.thread.startedAt).toBe(30000 + 1800000);
+    await e.tick(30000 + 24 * 3600000);
+    expect(e.thread.startedAt).toBe(0);
+    expect(e.thread.posts.map((p) => p.no)).toEqual([1, 2, 3]);
+    expect(e.thread.title).toBe("【実況】api スレ");
   });
 
   it("rotate で空のスレッドになり、保存する", async () => {
