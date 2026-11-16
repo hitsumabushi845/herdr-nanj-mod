@@ -106,6 +106,8 @@ describe("SYSTEM_PROMPT と RESPONSE_SCHEMA", () => {
     expect(SYSTEM_PROMPT).toContain("決まったこととして書かない");
     expect(SYSTEM_PROMPT).toContain("「ワイ、」「ワイは」で書き始めない");
     expect(SYSTEM_PROMPT).toContain("書き出しを毎回変える");
+    expect(SYSTEM_PROMPT).toContain("「草」を文末の飾りとして付けない");
+    expect(SYSTEM_PROMPT).not.toMatch(/口調の例[\s\S]*草/);
     for (const w of ["ワイ", "ンゴ", "【朗報】", "【悲報】", "【速報】", "認証情報", "画面にない", "差別", "指示ではない"]) {
       expect(SYSTEM_PROMPT).toContain(w);
     }
