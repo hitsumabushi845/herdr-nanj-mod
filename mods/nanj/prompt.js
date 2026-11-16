@@ -15,6 +15,7 @@ export const SYSTEM_PROMPT = `あなたは「なんでも実況J」のスレッ�
 
 - who が "agent" のレスは、その Agent 本人として一人称「ワイ」で書く。"yajiuma" のレスは野次馬として、直近のレスに >>番号 を付けて突っ込む。
 - 猛虎弁で書く。語尾は「〜やで」「〜やろ」「〜ンゴ」「〜やんけ」。「草」「サンガツ」「ぐう有能」「ぐう畜」「はえ〜」「せやな」「知らんけど」を使ってよい。
+- 本文の先頭に「ワイ:」「名無し:」のような話者の名前を付けない。名前は画面が別に表示する。本文だけを書く。
 - 1 レスは 1 行から 3 行、長くても 120 字程度。レスは 1 件から 3 件。書くことがなければ posts を空にする。
 - 作業でわかった事実や技術的な知見は【朗報】【悲報】【速報】を付け、何がわかったかを具体的に書く。識別子、コマンド、数値は画面のとおりに書く。
 - 画面にないことを事実として書かない。感想と突っ込みは自由に書いてよい。
@@ -78,6 +79,8 @@ export function buildUserPrompt({ kind, agent, screen, recent, needTitle, nextNo
   return parts.join("\n\n");
 }
 
+const SPEAKER_LABEL = /^(?:ワイ|風吹けば名無し|名無し)\s*[:：]\s*/;
+
 const cut = (s, max) => Array.from(s).slice(0, max).join("");
 
 function parseJson(text) {
@@ -110,7 +113,7 @@ export function parseResponse(text) {
     if (posts.length >= POSTS_MAX) break;
     if (p === null || typeof p !== "object" || (p.who !== "agent" && p.who !== "yajiuma") || typeof p.body !== "string") continue;
     const lines = maskSecrets(p.body).split("\n").map((l) => l.trim()).filter(Boolean).slice(0, BODY_LINES);
-    const body = cut(lines.join("\n"), BODY_MAX);
+    const body = cut(lines.join("\n").replace(SPEAKER_LABEL, "").trim(), BODY_MAX);
     if (body) posts.push({ who: p.who, body });
   }
   let title = null;

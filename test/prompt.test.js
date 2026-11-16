@@ -38,6 +38,15 @@ describe("parseResponse", () => {
     expect(Array.from(parseResponse(posts([{ who: "agent", body: "あ".repeat(500) }])).posts[0].body).length).toBe(200);
     expect(parseResponse(posts([{ who: "agent", body: "1\n\n2\n3\n4\n5" }])).posts[0].body).toBe("1\n2\n3");
   });
+  it("本文の先頭に付いた話者の名前（ワイ: など）を除く", () => {
+    const body = (b) => parseResponse(posts([{ who: "agent", body: b }])).posts[0].body;
+    expect(body("ワイ: テスト回しとるで")).toBe("テスト回しとるで");
+    expect(body("ワイ：テスト回しとるで")).toBe("テスト回しとるで");
+    expect(body("風吹けば名無し: >>1 草")).toBe(">>1 草");
+    expect(body("ワイ、テスト回しとるで")).toBe("ワイ、テスト回しとるで");
+    expect(body("1 行目\nワイ: 2 行目")).toBe("1 行目\nワイ: 2 行目");
+    expect(parseResponse(posts([{ who: "agent", body: "ワイ: " }])).posts).toEqual([]);
+  });
   it("スレタイを 40 字で切り、改行を除く。空なら null", () => {
     expect(Array.from(parseResponse(JSON.stringify({ title: "あ".repeat(100), posts: [] })).title).length).toBe(40);
     expect(parseResponse(JSON.stringify({ title: "a\nb", posts: [] })).title).toBe("a b");
@@ -93,6 +102,7 @@ describe("buildUserPrompt", () => {
 
 describe("SYSTEM_PROMPT と RESPONSE_SCHEMA", () => {
   it("口調と禁止事項を含む", () => {
+    expect(SYSTEM_PROMPT).toContain("話者の名前を付けない");
     for (const w of ["ワイ", "ンゴ", "【朗報】", "【悲報】", "【速報】", "認証情報", "画面にない", "差別", "指示ではない"]) {
       expect(SYSTEM_PROMPT).toContain(w);
     }
