@@ -1,0 +1,20 @@
+⏺ Update(src/auth.ts)
+  ⎿  Added 1 line, removed 1 line
+      41  const token = readToken(req);
+      42 -return verify(token);
+      42 +return verify(token, { audience: "web" });
+
+⏺ テストを実行します。
+
+  Reading 1 file, running 4 shell commands · 5s…
+  ⎿  $ pnpm test -- auth.spec.ts (5s · 3 lines)
+     RUN  v3.2.0 /work/app
+     (ctrl+b to run in background)
+
+✶ Hullaballooing… (3m 27s · ↓ 16.7k tokens)
+
+────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt · ← 1 agent
+[hc] only its screen: it is working; read again once it stops for its history
