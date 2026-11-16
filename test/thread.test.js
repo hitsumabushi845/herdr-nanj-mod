@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { YAJIUMA_NAME } from "../mods/nanj/names.js";
 import {
-  newThread, append, nextNo, stamp, shortStamp, segments, serialize, deserialize, MAX_POSTS, COLOR_SLOTS,
+  newThread, append, nextNo, setTitle, stamp, shortStamp, segments, serialize, deserialize, MAX_POSTS, COLOR_SLOTS,
 } from "../mods/nanj/thread.js";
 
 const api = { address: "t17", name: "api" };
@@ -79,8 +79,24 @@ describe("stamp", () => {
   });
 });
 
+describe("スレタイ", () => {
+  it("新しいスレッドはスレタイも付けた時刻も持たない", () => {
+    expect(newThread(3)).toMatchObject({ title: null, titleAt: null });
+  });
+  it("setTitle はスレタイと付けた時刻を入れる", () => {
+    const t = setTitle(newThread(0), "【朗報】題", 99);
+    expect(t).toMatchObject({ title: "【朗報】題", titleAt: 99 });
+    expect(newThread(0).title).toBeNull();
+  });
+  it("付けた時刻のない保存データは、スレッドの開始時刻を使う", () => {
+    const old = '{"v":1,"title":"前からの題","startedAt":5,"posts":[],"colors":{}}';
+    expect(deserialize(old, 9)).toMatchObject({ title: "前からの題", titleAt: 5 });
+    expect(deserialize('{"v":1,"title":"x","titleAt":"bad","startedAt":5,"posts":[],"colors":{}}', 9)).toEqual(newThread(9));
+  });
+});
+
 describe("保存の形", () => {
-  const t = append({ ...newThread(1), title: "【悲報】テスト" }, [{ who: "agent", body: "a" }], api, 5, zero);
+  const t = append(setTitle(newThread(1), "【悲報】テスト", 2), [{ who: "agent", body: "a" }], api, 5, zero);
   it("書いて読むと元に戻る", () => {
     expect(deserialize(serialize(t), 9)).toEqual(t);
   });

@@ -3,14 +3,33 @@
 import { YAJIUMA_NAME, yajiumaId } from "./names.js";
 
 /** @typedef {{no: number, name: string, id: string, agent: string | null, at: number, body: string}} Post */
-/** @typedef {{v: 1, title: string | null, startedAt: number, posts: Post[], colors: Record<string, number>}} Thread */
+/**
+ * @typedef {object} Thread
+ * @property {1} v
+ * @property {string | null} title
+ * @property {number | null} titleAt スレタイを付けた時刻。付け直す時期を決めるのに使う
+ * @property {number} startedAt
+ * @property {Post[]} posts
+ * @property {Record<string, number>} colors
+ */
 
 export const MAX_POSTS = 1000;
 export const COLOR_SLOTS = 8;
 
 /** @param {number} now @returns {Thread} */
 export function newThread(now) {
-  return { v: 1, title: null, startedAt: now, posts: [], colors: {} };
+  return { v: 1, title: null, titleAt: null, startedAt: now, posts: [], colors: {} };
+}
+
+/**
+ * スレタイを付ける、または付け直す。
+ * @param {Thread} thread
+ * @param {string} title
+ * @param {number} now
+ * @returns {Thread}
+ */
+export function setTitle(thread, title, now) {
+  return { ...thread, title, titleAt: now };
 }
 
 /** 次に付くレスの番号。古いレスを落としたあとも番号は続く。 @param {Thread} thread */
@@ -100,10 +119,13 @@ export function deserialize(text, now) {
     const t = text == null ? null : JSON.parse(text);
     if (
       isObj(t) && t.v === 1 && (t.title === null || typeof t.title === "string") && typeof t.startedAt === "number" &&
+      (t.titleAt === undefined || t.titleAt === null || typeof t.titleAt === "number") &&
       Array.isArray(t.posts) && t.posts.every(validPost) && isObj(t.colors) &&
       Object.values(t.colors).every((c) => typeof c === "number")
     ) {
-      return { v: 1, title: t.title, startedAt: t.startedAt, posts: t.posts, colors: t.colors };
+      // 付けた時刻のない古い保存データは、スレッドの開始時刻で補う
+      const titleAt = t.title === null ? null : (t.titleAt ?? t.startedAt);
+      return { v: 1, title: t.title, titleAt, startedAt: t.startedAt, posts: t.posts, colors: t.colors };
     }
   } catch {
     // 壊れたファイルは新しいスレッドとして扱う

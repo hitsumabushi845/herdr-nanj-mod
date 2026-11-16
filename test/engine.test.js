@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { DEFAULTS } from "../mods/nanj/config.js";
 import { newThread, append, serialize } from "../mods/nanj/thread.js";
-import { createEngine, holdsLease, needsReload, applyEnabled, LEASE_MS, MAX_FAILURES } from "../mods/nanj/engine.js";
+import { createEngine, holdsLease, needsReload, applyEnabled, LEASE_MS, MAX_FAILURES, TITLE_REFRESH_MS } from "../mods/nanj/engine.js";
 
 const agent = (address, status, space_name = "api", tab_name = "1") => ({ address, status, space: "s-" + space_name, space_name, tab_name });
 const reply = (body = "テスト回しとるンゴ", title) => JSON.stringify({ ...(title ? { title } : {}), posts: [{ who: "agent", body }] });
@@ -81,6 +81,36 @@ describe("tick", () => {
     expect(f.log.generate.length).toBe(2);
     expect(f.log.generate[1].user).not.toContain("スレタイ");
     expect(f.log.generate[1].user).toContain("テスト回しとるンゴ");
+  });
+
+  it("スレタイが 30 分より古くなったら、次のレスと一緒に付け直す", async () => {
+    expect(TITLE_REFRESH_MS).toBe(1800000);
+    const { f, e } = await started({ respond: async () => reply("a", "【朗報】最初の題") });
+    await e.tick(0);
+    f.screens.t1 = "別の作業";
+    f.respond = async () => reply("b", "【速報】新しい題");
+    await e.tick(1799000);
+    expect(f.log.generate.at(-1).user).not.toContain("スレタイ");
+    expect(e.thread.title).toBe("【朗報】最初の題");
+    f.screens.t1 = "さらに別の作業";
+    await e.tick(1799000 + 90000);
+    expect(f.log.generate.at(-1).user).toContain("付け直す");
+    expect(f.log.generate.at(-1).user).toContain("【朗報】最初の題");
+    expect(e.thread.title).toBe("【速報】新しい題");
+    expect(e.thread.titleAt).toBe(1799000 + 90000);
+    expect(e.thread.posts.map((p) => p.no)).toEqual([1, 2, 3]);
+  });
+
+  it("付け直しを頼んでも応答にスレタイがなければ、今のスレタイを残して次も頼む", async () => {
+    const { f, e } = await started({ respond: async () => reply("a", "【朗報】最初の題") });
+    await e.tick(0);
+    f.respond = async () => reply("b");
+    f.screens.t1 = "別の作業";
+    await e.tick(1800000);
+    expect(e.thread.title).toBe("【朗報】最初の題");
+    f.screens.t1 = "さらに別の作業";
+    await e.tick(1800000 + 90000);
+    expect(f.log.generate.at(-1).user).toContain("付け直す");
   });
 
   it("生成が終わらないうちは次の生成を始めない", async () => {
@@ -232,7 +262,7 @@ describe("失敗", () => {
 
 describe("スレッドは 1 本", () => {
   it("1000 レスに達しても同じスレッドに続けて書き、番号を続ける", async () => {
-    let full = { ...newThread(0), title: "ずっと続くスレ" };
+    let full = { ...newThread(0), title: "ずっと続くスレ", titleAt: 0 };
     for (let i = 0; i < 1000; i++) full = append(full, [{ who: "yajiuma", body: "x" }], null, i, () => 0);
     const { f, e } = await started({ stored: serialize(full) });
     await e.tick(5000);

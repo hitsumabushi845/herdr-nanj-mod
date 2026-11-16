@@ -83,6 +83,13 @@ describe("buildUserPrompt", () => {
     expect(u).toContain("レス本文6番");
     expect(u).toContain("レス本文15番");
   });
+  it("スレタイを付け直すときは、今のスレタイを伝える", () => {
+    const u = buildUserPrompt({ ...base, currentTitle: "【悲報】古い題" });
+    expect(u).toContain("付け直す");
+    expect(u).toContain("【悲報】古い題");
+    expect(buildUserPrompt(base)).toContain("まだスレタイがない");
+    expect(buildUserPrompt({ ...base, needTitle: false, currentTitle: "【悲報】古い題" })).not.toContain("スレタイ");
+  });
   it("次のレス番号を伝える", () => {
     expect(buildUserPrompt({ ...base, nextNo: 12 })).toContain("次のレスは 12 番");
     expect(buildUserPrompt(base)).not.toContain("次のレスは");

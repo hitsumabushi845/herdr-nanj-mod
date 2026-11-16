@@ -4,7 +4,7 @@ import { agentNames } from "./names.js";
 import { screenKey } from "./screen.js";
 import { canCall, record } from "./budget.js";
 import { initialState, observe, pick, commit, drop, workingSince } from "./triggers.js";
-import { newThread, append, nextNo, serialize, deserialize } from "./thread.js";
+import { newThread, append, nextNo, setTitle, serialize, deserialize } from "./thread.js";
 import { SYSTEM_PROMPT, RECENT_MAX, buildUserPrompt, parseResponse } from "./prompt.js";
 
 /** @typedef {import("./config.js").Config} Config */
@@ -24,6 +24,8 @@ import { SYSTEM_PROMPT, RECENT_MAX, buildUserPrompt, parseResponse } from "./pro
 
 export const LEASE_MS = 45000;
 export const MAX_FAILURES = 3;
+/** スレタイがこれより古くなったら、次のレスと一緒に付け直す。 */
+export const TITLE_REFRESH_MS = 1800000;
 
 /**
  * 生成役のリースを自分が持てるか。リースがない、自分のもの、LEASE_MS 以上古いときに true。
@@ -172,10 +174,14 @@ export function createEngine(deps) {
       };
     }
 
+    // スレタイは、ないときと、付けてから TITLE_REFRESH_MS たったときに頼む。レスの生成に相乗りし、呼び出しは増やさない。
+    const { title, titleAt } = engine.thread;
+    const needTitle = title === null || now - (titleAt ?? engine.thread.startedAt) >= TITLE_REFRESH_MS;
     const user = buildUserPrompt({
       kind: trigger.kind, agent, screen,
       recent: engine.thread.posts.slice(-RECENT_MAX),
-      needTitle: engine.thread.title === null,
+      needTitle,
+      currentTitle: title,
       nextNo: nextNo(engine.thread),
     });
     calls = record(calls, now);
@@ -201,7 +207,9 @@ export function createEngine(deps) {
     if (parsed.posts.length === 0) return;
 
     const next = append(engine.thread, parsed.posts, agent ? { address: agent.address, name: agent.name } : null, now, deps.rand);
-    engine.thread = next.title === null ? { ...next, title: parsed.title ?? `【実況】${agent ? agent.name : "なんJ"} スレ` } : next;
+    if (needTitle && parsed.title) engine.thread = setTitle(next, parsed.title, now);
+    else if (next.title === null) engine.thread = setTitle(next, `【実況】${agent ? agent.name : "なんJ"} スレ`, now);
+    else engine.thread = next;
     await persist();
   }
 

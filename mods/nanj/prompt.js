@@ -67,14 +67,19 @@ const KIND_TEXT = {
  * @param {Post[]} input.recent
  * @param {boolean} input.needTitle
  * @param {number} [input.nextNo] これから書くレスの最初の番号。アンカーを正しく付けるために伝える
+ * @param {string | null} [input.currentTitle] 今のスレタイ。needTitle のときにあれば、付け直しを頼む
  * @returns {string}
  */
-export function buildUserPrompt({ kind, agent, screen, recent, needTitle, nextNo }) {
+export function buildUserPrompt({ kind, agent, screen, recent, needTitle, nextNo, currentTitle }) {
   const parts = [KIND_TEXT[kind](agent ? Math.floor(agent.workingForSec / 60) : 0)];
   if (agent) {
     parts.push(`Agent: 名前「${agent.name}」 ID:${agent.address} space「${agent.space}」 tab「${agent.tab}」 状態 ${agent.status}`);
   }
-  if (needTitle) parts.push("このスレッドにはまだスレタイがない。title にスレタイを書く。");
+  if (needTitle && currentTitle) {
+    parts.push(`スレタイを付け直す。今のスレタイは「${currentTitle}」。直近のレスと画面から、いまの流れに合う新しいスレタイを title に書く。今のスレタイと同じ題にしない。`);
+  } else if (needTitle) {
+    parts.push("このスレッドにはまだスレタイがない。title にスレタイを書く。");
+  }
   if (nextNo !== undefined) parts.push(`次のレスは ${nextNo} 番から始まる。同じ応答の中のレスにアンカーを付けるときは、この番号から数える。`);
   const last = recent.slice(-RECENT_MAX);
   if (last.length > 0) {
