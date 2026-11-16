@@ -1,0 +1,4 @@
+node_modules/
+.yomiyasu/
+.superpowers/
+.DS_Store
