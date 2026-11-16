@@ -49,6 +49,19 @@ export function needsReload(wasLeader, isLeader, sharedRev, seenRev) {
   return sharedRev !== seenRev;
 }
 
+/**
+ * 設定の enabled を停止の状態に反映する。初めてのときと、enabled が前に反映した値から変わったときだけ
+ * 設定に合わせる。変わっていなければ、ボタンで決めた状態を残す。
+ * @param {unknown} paused shared にある停止の状態
+ * @param {unknown} applied 前に反映した enabled
+ * @param {boolean} enabled 今の設定
+ * @returns {{paused: boolean, applied: boolean}}
+ */
+export function applyEnabled(paused, applied, enabled) {
+  if (typeof paused !== "boolean" || applied !== enabled) return { paused: !enabled, applied: enabled };
+  return { paused, applied: enabled };
+}
+
 const message = (e) => (e instanceof Error ? e.message : String(e));
 
 /** @param {Deps} deps */
@@ -66,16 +79,17 @@ export function createEngine(deps) {
     error: null,
 
     async init(now) {
+      engine.thread = newThread(now);
       await engine.reload(now);
     },
 
     /** 保存された内容を読み直す。生成役でないコピーが、他のコピーの書き込みを取り込むために使う。 */
     async reload(now) {
-      let text = null;
+      let text;
       try {
         text = await deps.load();
       } catch {
-        text = null;
+        return; // 読めないときは手元のスレッドを残す。空で上書きしない。
       }
       engine.thread = deserialize(text, now);
     },

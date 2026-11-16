@@ -9,7 +9,7 @@ import {
   shared, setShared, run, theme, props, closeOverlay,
 } from "herdr";
 import { parseConfig, DEFAULTS } from "./config.js";
-import { createEngine, holdsLease, needsReload } from "./engine.js";
+import { createEngine, holdsLease, needsReload, applyEnabled } from "./engine.js";
 import { stamp, shortStamp, segments } from "./thread.js";
 import { claudeArgs, extractText, CLAUDE_TIMEOUT_MS } from "./claude.js";
 
@@ -86,7 +86,6 @@ export default class Nanj extends View {
     cx.spawn(async (cx) => {
       await exec("mkdir", ["-p", this.dir]);
       await this.loadConfig();
-      if (typeof shared("nanj.paused") !== "boolean") setShared("nanj.paused", !this.cfg.enabled);
       await this.engine.init(Date.now());
       cx.notify();
       await this.pump();
@@ -141,7 +140,11 @@ export default class Nanj extends View {
     await this.catchUp(now, wasLeader);
     if (!this.leader) return;
     await this.loadConfig();
-    const paused = shared("nanj.paused") === true;
+    // 設定の enabled は、初めてのときと値が変わったときに停止の状態へ反映する。
+    const next = applyEnabled(shared("nanj.paused"), shared("nanj.enabled"), this.cfg.enabled);
+    if (next.applied !== shared("nanj.enabled")) setShared("nanj.enabled", next.applied);
+    if (next.paused !== shared("nanj.paused")) setShared("nanj.paused", next.paused);
+    const paused = next.paused;
     if (this.engine.paused !== paused) this.engine.setPaused(paused);
     await this.engine.tick(now);
     if (this.engine.paused && !paused) {

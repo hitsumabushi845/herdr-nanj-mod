@@ -19,11 +19,11 @@ export function tail(text, max = TAIL_MAX) {
 
 const RULE_ONLY = /^[\s─━═│┃╭╮╰╯┌┐└┘_-]+$/;
 const EMPTY_PROMPT = /^\s*[❯>]\s*$/;
-const STATUS = /⏵⏵|esc to interrupt|shift\+tab|\(ctrl\+[a-z] to /;
+const STATUS = /⏵⏵|esc to interrupt|shift\+tab|\(ctrl\+[a-z] to /i;
 const SPINNER = /^\s*(?:[✻✽✶✢✳⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s|[·*∗]\s.*…)/;
 const HC_NOTE = /^\[hc\]/;
 const BULLET = /^\s*[⏺●]\s*/;
-const TIME_OR_COUNT = /(?:\s*·\s*)?(?:↓\s*)?\d+(?:\.\d+)?\s*(?:k\s+tokens|tokens|lines|ms|[smh]|秒|分)(?![A-Za-z])/g;
+const TIME_OR_COUNT = /(?:\s*·\s*)?(?:↓\s*)?\d+(?:\.\d+)?\s*(?:k\s+tokens|tokens|lines|ms|[smh]|秒|分)(?![A-Za-z])/gi;
 
 /**
  * 内容と関係なく変わる行（スピナー、経過時間、入力欄、状態の行）を除いた行を返す。
@@ -61,12 +61,16 @@ const SECRET_PATTERNS = [
   [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, MASK],
   [/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, MASK],
   [/\bsk-[A-Za-z0-9_-]{16,}/g, MASK],
+  [/\bsk_(?:live|test)_[A-Za-z0-9]{10,}/g, MASK],
+  [/\bglpat-[A-Za-z0-9_-]{10,}/g, MASK],
+  [/\bAIza[0-9A-Za-z_-]{20,}/g, MASK],
   [/\bgithub_pat_[A-Za-z0-9_]{20,}/g, MASK],
   [/\bgh[pousr]_[A-Za-z0-9]{20,}/g, MASK],
   [/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, MASK],
   [/\bxox[baprs]-[A-Za-z0-9-]{10,}/g, MASK],
-  [/\b(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/g, `$1${MASK}`],
-  [/([A-Za-z0-9_-]*(?:password|passwd|secret|token|api[_-]?key|access[_-]?key)[A-Za-z0-9_-]*\s*[:=]\s*)(["']?)[^\s"']{8,}\2/gi, `$1${MASK}`],
+  [/\b((?:Bearer|Basic)\s+)[A-Za-z0-9._~+/=-]{8,}/g, `$1${MASK}`],
+  [/\b([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@/]+(?=@)/gi, `$1${MASK}`],
+  [/([A-Za-z0-9_-]*(?:password|passwd|secret|token|api[_-]?key|access[_-]?key)[A-Za-z0-9_-]*["']?\s*[:=]\s*)(["']?)[^\s"']{8,}\2/gi, `$1${MASK}`],
 ];
 
 /**

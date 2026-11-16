@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { DEFAULTS } from "../mods/nanj/config.js";
 import { newThread, append, serialize } from "../mods/nanj/thread.js";
-import { createEngine, holdsLease, needsReload, LEASE_MS, MAX_FAILURES } from "../mods/nanj/engine.js";
+import { createEngine, holdsLease, needsReload, applyEnabled, LEASE_MS, MAX_FAILURES } from "../mods/nanj/engine.js";
 
 const agent = (address, status, space_name = "api", tab_name = "1") => ({ address, status, space: "s-" + space_name, space_name, tab_name });
 const reply = (body = "テスト回しとるンゴ", title) => JSON.stringify({ ...(title ? { title } : {}), posts: [{ who: "agent", body }] });
@@ -277,6 +277,13 @@ describe("読み込み", () => {
     await e.init(7);
     expect(e.thread).toEqual(newThread(7));
   });
+  it("reload で読み込みに失敗したら、手元のスレッドを残す", async () => {
+    const { f, e } = await started();
+    await e.tick(0);
+    f.deps.load = async () => { throw new Error("too large"); };
+    await e.reload(5);
+    expect(e.thread.posts.length).toBe(1);
+  });
   it("reload は保存された内容を読み直す", async () => {
     const { f, e } = await started();
     f.stored = serialize(append(newThread(1), [{ who: "yajiuma", body: "外から" }], null, 2, () => 0));
@@ -294,6 +301,21 @@ describe("holdsLease", () => {
     expect(holdsLease({ id: "b", at: 0 }, "a", 44999)).toBe(false);
     expect(holdsLease({ id: "b", at: 0 }, "a", 45000)).toBe(true);
     expect(holdsLease("壊れた値", "a", 0)).toBe(true);
+  });
+});
+
+describe("applyEnabled", () => {
+  it("初めてのときは設定の enabled に従う", () => {
+    expect(applyEnabled(undefined, undefined, true)).toEqual({ paused: false, applied: true });
+    expect(applyEnabled(undefined, undefined, false)).toEqual({ paused: true, applied: false });
+  });
+  it("設定の enabled が変わったら、その値に合わせる", () => {
+    expect(applyEnabled(false, true, false)).toEqual({ paused: true, applied: false });
+    expect(applyEnabled(true, false, true)).toEqual({ paused: false, applied: true });
+  });
+  it("設定が変わっていなければ、ボタンで決めた状態を残す", () => {
+    expect(applyEnabled(true, true, true)).toEqual({ paused: true, applied: true });
+    expect(applyEnabled(false, false, false)).toEqual({ paused: false, applied: false });
   });
 });
 

@@ -30,6 +30,10 @@ describe("stableLines", () => {
   it("入力欄に書きかけの文があれば残す", () => {
     expect(stableLines("❯ 次はテストを直して")).toEqual(["❯ 次はテストを直して"]);
   });
+  it("大文字と小文字の違う表示も同じように扱う", () => {
+    expect(stableLines("12.3K tokens used")).toEqual(stableLines("15.9K tokens used"));
+    expect(stableLines("Esc to interrupt\n本文")).toEqual(["本文"]);
+  });
   it("経過時間と数を置き換える", () => {
     expect(stableLines("  ⎿  $ pnpm test (5s · 3 lines)")).toEqual(stableLines("  ⎿  $ pnpm test (12s · 9 lines)"));
   });
@@ -60,6 +64,14 @@ describe("maskSecrets", () => {
     "API_KEY: abcd1234efgh5678",
     "Authorization: Bearer abc.def.ghi",
     "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijklmnop",
+    '{"password": "hunter2hunter2xx"}',
+    '"api_key": "abcd1234efgh5678"',
+    '"token":"abcd1234efgh5678"',
+    "postgres://admin:SuperSecret123@host/x",
+    "Authorization: Basic dXNlcjpwYXNzd29yZGFi",
+    "sk_live_abcdefghijklmnop1234",
+    "glpat-abcdefghijklmnop1234",
+    "AIzaSyA1234567890abcdefghijklmnopqrstu",
   ])("%s を伏せる", (s) => {
     const out = maskSecrets(`前 ${s} 後`);
     expect(out).not.toContain(s.split(/[ =:]+/).pop());
