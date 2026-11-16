@@ -37,13 +37,19 @@ claude -p --model <model> --tools "" --strict-mcp-config --setting-sources "" \
 
 ### mod の置き場所
 
-- 出荷時のレイアウト（`main`）には、`mod.json` の `"place": "right"` を書いても自動では入らない。
+- 出荷時のレイアウト（`main`）には `mod.json` の `"place": "right"` を書いても自動では入らない。
 - `mod.json` に `"overlay": { "kind": "window", "key": "nanj", "keep": true, "width": 440, "height": 620 }` を書くと、`herdr-app do mod.open --name nanj` で浮動ウィンドウとして開閉できる。
 - `tab.new {mod: "nanj"}` と `pane.split {direction, mod: "nanj"}` でも置ける。
 
+### mod のコピー
+
+- コピーは一度表示されるまで始まらない。`tab.new {focus: false}` で作っただけのコピーは `init` も走らない。
+- 2 つのコピーを動かして確かめるときは、浮動ウィンドウと、表示中のタブの `pane.split {mod}` を使う。
+- `render` の中で `cx.spawn` して読み直す作りでは、生成役でないコピーが他のコピーの書き込みを取り込めなかった。原因は突き止めていない。読み直しはタイマーの中で行う。
+
 ### gpui-kit での描画
 
-- 色の違う文字列は、`h_flex().flex_wrap()` の中に `div().text_color(...)` を並べて描く。長い文字列の `div` は `min_w(0)` を付けると枠の幅で折り返す。アンカーのあとの長い本文は、アンカーの次の行から始まる。
-- 末尾への移動は、`gpui-base` の `ScrollHandle.new()` を `init` で作り、`overflow_y_scrollbar().track_scroll(handle)` を付けた `v_flex` に対して `handle.scroll_to_item(最後の子の番号)` を呼ぶ。`VirtualListScrollHandle` 以外に `scroll_to_bottom` はない。
+- 色の違う文字列は `h_flex().flex_wrap()` の中に `div().text_color(...)` を並べて描く。長い文字列の `div` は `min_w(0)` を付けると枠の幅で折り返す。アンカーのあとの長い本文はアンカーの次の行から始まる。
+- 末尾への移動は `gpui-base` の `ScrollHandle.new()` を `init` で作り、`overflow_y_scrollbar().track_scroll(handle)` を付けた `v_flex` に対して `handle.scroll_to_item(最後の子の番号)` を呼ぶ。`VirtualListScrollHandle` 以外に `scroll_to_bottom` はない。
 - 今のスクロールの位置を読む API はない。`on_scroll_wheel((e) => e.delta.y)` で利用者の操作を受け取れる。
 - `Date` はローカル時刻を返す。
