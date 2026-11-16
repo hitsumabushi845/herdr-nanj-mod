@@ -306,7 +306,8 @@ describe("mod の決まり", () => {
     }
   });
   it("Agent の端末に入力を送る呼び出しがない", () => {
-    for (const f of files.filter((f) => f !== "main.js")) {
+    expect(files).toContain("main.js");
+    for (const f of files) {
       expect(readFileSync(new URL(f, dir), "utf8"), f).not.toMatch(/["'](send|keys|interrupt|kill|put)["']|terminal\.(paste|kill)/);
     }
   });
