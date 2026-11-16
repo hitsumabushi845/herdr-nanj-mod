@@ -36,6 +36,19 @@ export function holdsLease(lease, myId, now) {
   return lease.id === myId || now - lease.at >= LEASE_MS;
 }
 
+/**
+ * 保存されたスレッドを読み直す必要があるか。
+ * 生成役を引き継いだとき（手元の内容が古い）と、生成役でないコピーが他のコピーの書き込みを見たときに true。
+ * @param {boolean} wasLeader
+ * @param {boolean} isLeader
+ * @param {unknown} sharedRev shared に書かれている版
+ * @param {unknown} seenRev このコピーが最後に取り込んだ版
+ */
+export function needsReload(wasLeader, isLeader, sharedRev, seenRev) {
+  if (isLeader) return !wasLeader;
+  return sharedRev !== seenRev;
+}
+
 const message = (e) => (e instanceof Error ? e.message : String(e));
 
 /** @param {Deps} deps */

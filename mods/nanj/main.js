@@ -9,11 +9,12 @@ import {
   shared, setShared, run, theme, props, closeOverlay,
 } from "herdr";
 import { parseConfig, DEFAULTS } from "./config.js";
-import { createEngine, holdsLease } from "./engine.js";
+import { createEngine, holdsLease, needsReload } from "./engine.js";
 import { stamp, shortStamp, segments } from "./thread.js";
 import { claudeArgs, extractText, CLAUDE_TIMEOUT_MS } from "./claude.js";
 
 const TICK_MS = 15000;
+const POLL_MS = 3000; // 他のコピーの書き込みと次スレの依頼を見る間隔
 const SHOWN_POSTS = 200; // 描くのは新しいほうからこの件数まで
 const NARROW_PX = 260;
 
@@ -66,9 +67,10 @@ export default class Nanj extends View {
         const path = this.dir + "/thread.json";
         try {
           await writeTextFile(path, text, this.lastText);
-        } catch (_e) {
-          // 別のコピーが先に書いていた。今の中身を読み直して 1 回だけやり直す。
-          await writeTextFile(path, text, await readTextFile(path));
+        } catch (e) {
+          // 別のコピーが先に書いていた。上書きせず、保存されている内容を正として読み直す。
+          await this.engine.reload(Date.now());
+          throw e;
         }
         this.lastText = text;
       },
@@ -96,6 +98,30 @@ export default class Nanj extends View {
         cx.notify();
       });
     });
+    // 値を比べるだけの軽い見回り。変化があったときだけ読み直して描き直す。
+    cx.timer.every(POLL_MS, (cx) => {
+      const stale = !this.leader && shared("nanj.rev") !== this.rev;
+      const rotate = this.leader && shared("nanj.rotate") !== this.rotateSeen;
+      if (!stale && !rotate) return;
+      cx.spawn(async (cx) => {
+        await this.catchUp(Date.now());
+        cx.notify();
+      });
+    });
+  }
+
+  /** 他のコピーの書き込みを取り込み、生成役なら次スレの依頼を処理する。 */
+  async catchUp(now, wasLeader = this.leader) {
+    const rev = shared("nanj.rev");
+    if (needsReload(wasLeader, this.leader, rev, this.rev)) {
+      this.rev = rev;
+      await this.engine.reload(now);
+    }
+    const rotate = shared("nanj.rotate");
+    if (this.leader && rotate !== this.rotateSeen) {
+      this.rotateSeen = rotate;
+      await this.engine.rotate(now);
+    }
   }
 
   async loadConfig() {
@@ -109,9 +135,11 @@ export default class Nanj extends View {
   /** 生成役なら 1 回分進める。生成役は shared のリースで 1 つに絞る。 */
   async pump() {
     const now = Date.now();
+    const wasLeader = this.leader;
     this.leader = holdsLease(shared("nanj.leader"), this.id, now);
+    if (this.leader) setShared("nanj.leader", { id: this.id, at: now });
+    await this.catchUp(now, wasLeader);
     if (!this.leader) return;
-    setShared("nanj.leader", { id: this.id, at: now });
     await this.loadConfig();
     const paused = shared("nanj.paused") === true;
     if (this.engine.paused !== paused) this.engine.setPaused(paused);
@@ -131,32 +159,7 @@ export default class Nanj extends View {
     setShared("nanj.paused", !paused);
   }
 
-  /** 他のコピーの書き込みと、次スレの依頼を取り込む。 */
-  sync(cx) {
-    const rev = shared("nanj.rev");
-    if (rev !== this.rev) {
-      this.rev = rev;
-      if (!this.leader) {
-        cx.spawn(async (cx) => {
-          await this.engine.reload(Date.now());
-          cx.notify();
-        });
-      }
-    }
-    const rotate = shared("nanj.rotate");
-    if (rotate !== this.rotateSeen) {
-      this.rotateSeen = rotate;
-      if (this.leader) {
-        cx.spawn(async (cx) => {
-          await this.engine.rotate(Date.now());
-          cx.notify();
-        });
-      }
-    }
-  }
-
   render(cx) {
-    if (!checking()) this.sync(cx);
     const c = this.cfg.palette === "theme" ? themed() : CLASSIC;
     const thread = this.engine.thread;
     const paused = shared("nanj.paused") === true;

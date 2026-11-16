@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { DEFAULTS } from "../mods/nanj/config.js";
 import { newThread, append, serialize } from "../mods/nanj/thread.js";
-import { createEngine, holdsLease, LEASE_MS, MAX_FAILURES } from "../mods/nanj/engine.js";
+import { createEngine, holdsLease, needsReload, LEASE_MS, MAX_FAILURES } from "../mods/nanj/engine.js";
 
 const agent = (address, status, space_name = "api", tab_name = "1") => ({ address, status, space: "s-" + space_name, space_name, tab_name });
 const reply = (body = "テスト回しとるンゴ", title) => JSON.stringify({ ...(title ? { title } : {}), posts: [{ who: "agent", body }] });
@@ -294,6 +294,23 @@ describe("holdsLease", () => {
     expect(holdsLease({ id: "b", at: 0 }, "a", 44999)).toBe(false);
     expect(holdsLease({ id: "b", at: 0 }, "a", 45000)).toBe(true);
     expect(holdsLease("壊れた値", "a", 0)).toBe(true);
+  });
+});
+
+describe("needsReload", () => {
+  it("生成役を引き継いだときは、手元のスレッドが古いので読み直す", () => {
+    expect(needsReload(false, true, "r1", "r1")).toBe(true);
+  });
+  it("生成役でないコピーは、他のコピーが書いたら読み直す", () => {
+    expect(needsReload(false, false, "r2", "r1")).toBe(true);
+    expect(needsReload(false, false, "r1", "r1")).toBe(false);
+  });
+  it("生成役を続けている間は読み直さない", () => {
+    expect(needsReload(true, true, "r2", "r1")).toBe(false);
+  });
+  it("生成役を降りたときは、書かれていれば読み直す", () => {
+    expect(needsReload(true, false, "r2", "r1")).toBe(true);
+    expect(needsReload(true, false, "r1", "r1")).toBe(false);
   });
 });
 
