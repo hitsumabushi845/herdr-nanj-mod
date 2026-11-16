@@ -74,7 +74,7 @@ export function buildUserPrompt({ kind, agent, screen, recent, needTitle, nextNo
   if (last.length > 0) {
     parts.push("直近のレス:\n" + last.map((p) => `${p.no} ${p.name} ID:${p.id}\n${p.body}`).join("\n"));
   }
-  if (screen !== null) parts.push("端末の画面の末尾:\n<screen>\n" + maskSecrets(tail(screen)) + "\n</screen>");
+  if (screen !== null) parts.push("端末の画面の末尾:\n<screen>\n" + tail(maskSecrets(screen)) + "\n</screen>");
   return parts.join("\n\n");
 }
 

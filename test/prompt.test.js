@@ -56,6 +56,12 @@ describe("buildUserPrompt", () => {
   it("画面の認証情報を伏せる", () => {
     expect(buildUserPrompt(base)).not.toContain("ghp_");
   });
+  it("末尾を切る前に伏せるので、見出しが切れた秘密鍵の中身も残らない", () => {
+    const key = "-----BEGIN RSA PRIVATE KEY-----\n" + Array(100).fill("QUJD".repeat(16)).join("\n") + "\n-----END RSA PRIVATE KEY-----";
+    const u = buildUserPrompt({ ...base, screen: key + "\n最後の行" });
+    expect(u).not.toContain("QUJDQUJD");
+    expect(u).toContain("最後の行");
+  });
   it("画面は末尾の 4000 字まで", () => {
     const u = buildUserPrompt({ ...base, screen: "古い行\n" + "x".repeat(4500) + "\n新しい行" });
     expect(u).toContain("新しい行");
