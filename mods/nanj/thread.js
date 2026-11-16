@@ -1,0 +1,111 @@
+// スレッドのデータ、時刻の書式、アンカーの分割、保存の形。
+
+import { YAJIUMA_NAME, yajiumaId } from "./names.js";
+
+/** @typedef {{no: number, name: string, id: string, agent: string | null, at: number, body: string}} Post */
+/** @typedef {{v: 1, title: string | null, startedAt: number, posts: Post[], colors: Record<string, number>}} Thread */
+
+export const MAX_POSTS = 1000;
+export const COLOR_SLOTS = 8;
+
+/** @param {number} now @returns {Thread} */
+export function newThread(now) {
+  return { v: 1, title: null, startedAt: now, posts: [], colors: {} };
+}
+
+/**
+ * レスを足す。agent が null のとき（雑談）は、すべて野次馬のレスにする。
+ * @param {Thread} thread
+ * @param {{who: "agent" | "yajiuma", body: string}[]} entries
+ * @param {{address: string, name: string} | null} agent
+ * @param {number} now
+ * @param {() => number} rand
+ * @returns {Thread}
+ */
+export function append(thread, entries, agent, now, rand) {
+  const posts = [...thread.posts];
+  const colors = { ...thread.colors };
+  for (const e of entries) {
+    if (posts.length >= MAX_POSTS) break;
+    const own = e.who === "agent" && agent !== null;
+    if (own && !(agent.address in colors)) colors[agent.address] = Object.keys(colors).length % COLOR_SLOTS;
+    posts.push({
+      no: posts.length + 1,
+      name: own ? agent.name : YAJIUMA_NAME,
+      id: own ? agent.address : yajiumaId(rand),
+      agent: own ? agent.address : null,
+      at: now,
+      body: e.body,
+    });
+  }
+  return { ...thread, posts, colors };
+}
+
+/** @param {Thread} thread */
+export function isFull(thread) {
+  return thread.posts.length >= MAX_POSTS;
+}
+
+const p2 = (n) => String(n).padStart(2, "0");
+const DAYS = ["日", "月", "火", "水", "木", "金", "土"];
+
+/** @param {number} ms @returns {string} 例: 05:04:03 */
+export function shortStamp(ms) {
+  const d = new Date(ms);
+  return `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
+}
+
+/** @param {number} ms @returns {string} 例: 2026/11/16(月) 19:32:10 */
+export function stamp(ms) {
+  const d = new Date(ms);
+  return `${d.getFullYear()}/${p2(d.getMonth() + 1)}/${p2(d.getDate())}(${DAYS[d.getDay()]}) ${shortStamp(ms)}`;
+}
+
+/**
+ * 本文をアンカー（>>12）とそれ以外に分ける。
+ * @param {string} body
+ * @returns {{text: string, anchor: number | null}[]}
+ */
+export function segments(body) {
+  const out = [];
+  let last = 0;
+  for (const m of body.matchAll(/>>(\d+)/g)) {
+    if (m.index > last) out.push({ text: body.slice(last, m.index), anchor: null });
+    out.push({ text: m[0], anchor: Number(m[1]) });
+    last = m.index + m[0].length;
+  }
+  if (last < body.length) out.push({ text: body.slice(last), anchor: null });
+  return out;
+}
+
+/** @param {Thread} thread */
+export function serialize(thread) {
+  return JSON.stringify(thread);
+}
+
+const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+const validPost = (p) =>
+  isObj(p) && typeof p.no === "number" && typeof p.name === "string" && typeof p.id === "string" &&
+  (p.agent === null || typeof p.agent === "string") && typeof p.at === "number" && typeof p.body === "string";
+
+/**
+ * 保存した文字列からスレッドを読む。ない、壊れている、形が違うときは新しいスレッドを返す。
+ * @param {string | null} text
+ * @param {number} now
+ * @returns {Thread}
+ */
+export function deserialize(text, now) {
+  try {
+    const t = text == null ? null : JSON.parse(text);
+    if (
+      isObj(t) && t.v === 1 && (t.title === null || typeof t.title === "string") && typeof t.startedAt === "number" &&
+      Array.isArray(t.posts) && t.posts.every(validPost) && isObj(t.colors) &&
+      Object.values(t.colors).every((c) => typeof c === "number")
+    ) {
+      return { v: 1, title: t.title, startedAt: t.startedAt, posts: t.posts, colors: t.colors };
+    }
+  } catch {
+    // 壊れたファイルは新しいスレッドとして扱う
+  }
+  return newThread(now);
+}
