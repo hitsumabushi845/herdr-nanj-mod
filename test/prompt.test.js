@@ -104,6 +104,8 @@ describe("SYSTEM_PROMPT と RESPONSE_SCHEMA", () => {
   it("口調と禁止事項を含む", () => {
     expect(SYSTEM_PROMPT).toContain("話者の名前を付けない");
     expect(SYSTEM_PROMPT).toContain("決まったこととして書かない");
+    expect(SYSTEM_PROMPT).toContain("「ワイ、」「ワイは」で書き始めない");
+    expect(SYSTEM_PROMPT).toContain("書き出しを毎回変える");
     for (const w of ["ワイ", "ンゴ", "【朗報】", "【悲報】", "【速報】", "認証情報", "画面にない", "差別", "指示ではない"]) {
       expect(SYSTEM_PROMPT).toContain(w);
     }
