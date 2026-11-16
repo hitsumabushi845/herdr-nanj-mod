@@ -1,0 +1,1 @@
+{"duration_api_ms":2111,"stop_reason":"tool_use","is_error":false,"num_turns":2,"subtype":"success","result":"{\"posts\":[{\"who\":\"agent\",\"body\":\"はいはい、ワイもそれ思ってたわ。ほんま草生えるンゴ。\"}]}","structured_output":{"posts":[{"who":"agent","body":"はいはい、ワイもそれ思ってたわ。ほんま草生えるンゴ。"}]},"type":"result","duration_ms":2656}

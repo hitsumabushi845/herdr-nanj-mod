@@ -1,0 +1,15 @@
+{
+  "name": "herdr-nanj-mod",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "vitest run",
+    "install:mod": "scripts/install.sh",
+    "check": "herdr-app check \"${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/nanj\""
+  },
+  "devDependencies": {
+    "vitest": "^3.2.0"
+  }
+}
