@@ -228,3 +228,54 @@ export function deserializeIndex(text) {
   }
   return emptyIndex();
 }
+
+/**
+ * 全 Agent が 1 本に書いていたころのスレッドを、端末ごとのスレッドに分ける。
+ * 野次馬のレスは、同じ時刻（同じ生成）の Agent 本人のレスと同じスレッドに入れる。
+ * 同じ時刻の Agent 本人のレスがない野次馬のレス（雑談）は捨てる。
+ * @param {Thread} legacy
+ * @param {Record<string, string>} liveKeys 起動している端末のアドレスからキーへの対応
+ * @param {number} now
+ * @returns {{threads: Thread[], dropped: number}}
+ */
+export function migrate(legacy, liveKeys, now) {
+  // 同じ時刻のレスのうち、Agent 本人のレスの端末（最初のもの）。野次馬が先に並んでいるときに使う。
+  const firstAt = {};
+  for (const p of legacy.posts) if (p.agent !== null && !(p.at in firstAt)) firstAt[p.at] = p.agent;
+
+  const byAddress = {};
+  const order = [];
+  let dropped = 0;
+  let prev = null; // すぐ前の Agent 本人のレス
+  for (const p of legacy.posts) {
+    let address;
+    if (p.agent !== null) {
+      address = p.agent;
+      prev = p;
+    } else {
+      address = prev !== null && prev.at === p.at ? prev.agent : (firstAt[p.at] ?? null);
+    }
+    if (address === null) {
+      dropped++;
+      continue;
+    }
+    if (!(address in byAddress)) {
+      byAddress[address] = [];
+      order.push(address);
+    }
+    byAddress[address].push(p);
+  }
+
+  const threads = order.map((address) => {
+    const posts = byAddress[address];
+    const own = posts.filter((p) => p.agent !== null);
+    const owner = {
+      key: liveKeys[address] ?? threadKey(address, 0),
+      address,
+      name: own[own.length - 1].name,
+      color: legacy.colors[address] ?? 0,
+    };
+    return { ...newThread(posts[0].at, owner), posts: posts.slice(-MAX_POSTS) };
+  });
+  return { threads, dropped };
+}

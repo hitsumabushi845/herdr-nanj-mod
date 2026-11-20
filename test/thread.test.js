@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { YAJIUMA_NAME } from "../mods/nanj/names.js";
 import {
   newThread, append, nextNo, setTitle, stamp, threadKey, threadFile, emptyIndex, upsertIndex, removeFromIndex, nextColor,
-  staleKeys, serializeIndex, deserializeIndex, PRUNE_AFTER_MS, serialize as ser, shortStamp, segments, serialize, deserialize, MAX_POSTS, COLOR_SLOTS,
+  staleKeys, serializeIndex, deserializeIndex, PRUNE_AFTER_MS, serialize as ser, migrate, shortStamp, segments, serialize, deserialize, MAX_POSTS, COLOR_SLOTS,
 } from "../mods/nanj/thread.js";
 
 const api = { address: "t17", name: "api" };
@@ -179,5 +179,40 @@ describe("staleKeys", () => {
     expect(staleKeys({ v: 1, threads: [old] }, [], PRUNE_AFTER_MS)).toEqual(["t1@1"]);
     expect(staleKeys({ v: 1, threads: [old] }, [], PRUNE_AFTER_MS - 1)).toEqual([]);
     expect(staleKeys({ v: 1, threads: [old] }, ["t1@1"], PRUNE_AFTER_MS * 2)).toEqual([]);
+  });
+});
+
+describe("migrate", () => {
+  const post = (no, agent, at, name = agent ? "n-" + agent : "風吹けば名無し") => ({ no, name, id: agent ?? "x" + no, agent, at, body: "b" + no });
+  const legacy = { ...newThread(0), title: "旧題", titleAt: 1, colors: { t1: 2, t2: 5 }, posts: [
+    post(1, "t1", 10), post(2, null, 10), post(3, "t2", 20), post(4, null, 20), post(5, null, 30), post(6, "t1", 40, "改名後"),
+  ] };
+  const r = migrate(legacy, { t1: "t1@111" }, 99);
+  it("Agent 本人のレスと、同じ時刻の野次馬のレスを、端末ごとのスレッドに分ける", () => {
+    expect(r.threads.map((t) => [t.key, t.posts.map((p) => p.no)])).toEqual([["t1@111", [1, 2, 6]], ["t2@0", [3, 4]]]);
+  });
+  it("同じ時刻の Agent 本人のレスがない野次馬のレスは捨てて数える", () => {
+    expect(r.dropped).toBe(1);
+    expect(r.threads.reduce((n, t) => n + t.posts.length, 0) + r.dropped).toBe(legacy.posts.length);
+  });
+  it("持ち主は最後の名前と元の色。スレタイは付けない", () => {
+    expect(r.threads[0]).toMatchObject({ address: "t1", name: "改名後", color: 2, title: null, titleAt: null, startedAt: 10 });
+    expect(r.threads[1]).toMatchObject({ address: "t2", name: "n-t2", color: 5 });
+  });
+  it("レスは変えず、番号は元のまま続く", () => {
+    expect(r.threads[0].posts[0]).toEqual(legacy.posts[0]);
+    expect(nextNo(r.threads[0])).toBe(7);
+  });
+  it("同じ時刻に 2 つの端末のレスがあるとき、野次馬はすぐ前の Agent のレスの端末に入れる", () => {
+    const both = { ...newThread(0), posts: [post(1, "t1", 10), post(2, null, 10), post(3, "t2", 10), post(4, null, 10)] };
+    expect(migrate(both, {}, 0).threads.map((t) => t.posts.map((p) => p.no))).toEqual([[1, 2], [3, 4]]);
+  });
+  it("野次馬のレスが Agent のレスより前に並んでいても、同じ時刻なら同じスレッドに入れる", () => {
+    const before = { ...newThread(0), posts: [post(1, null, 10), post(2, "t1", 10)] };
+    expect(migrate(before, {}, 0)).toMatchObject({ dropped: 0, threads: [{ posts: [{ no: 1 }, { no: 2 }] }] });
+  });
+  it("元の色がなければ 0、空のスレッドは空を返す", () => {
+    expect(migrate({ ...newThread(0), posts: [post(1, "t3", 5)] }, {}, 0).threads[0].color).toBe(0);
+    expect(migrate(newThread(0), {}, 0)).toEqual({ threads: [], dropped: 0 });
   });
 });
