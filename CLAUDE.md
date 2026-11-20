@@ -41,6 +41,12 @@ claude -p --model <model> --tools "" --strict-mcp-config --setting-sources "" \
 - `mod.json` に `"overlay": { "kind": "window", "key": "nanj", "keep": true, "width": 440, "height": 620 }` を書くと、`herdr-app do mod.open --name nanj` で浮動ウィンドウとして開閉できる。
 - `tab.new {mod: "nanj"}` と `pane.split {direction, mod: "nanj"}` でも置ける。
 
+### 端末と Agent
+
+- `agents()` と `hc ls --json` には、端末の作成時刻がない。`hc get <端末> --json` の `created_ms` にある。
+- Agent は fish の端末の中で動く（`argv` は `fish -l`）。同じ端末で Agent を終了して起動し直しても、アドレスと `created_ms` は変わらない。
+- 横スクロールの列（`overflow_x_scrollbar()`）は、高さを `h(n)` で決めないと縦いっぱいに広がる。
+
 ### mod のコピー
 
 - コピーは一度表示されるまで始まらない。`tab.new {focus: false}` で作っただけのコピーは `init` も走らない。
