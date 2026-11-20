@@ -10,7 +10,9 @@
  */
 export function unread(thread, seenNo) {
   if (!thread) return 0;
-  if (typeof seenNo !== "number") return thread.posts.length;
+  if (typeof seenNo !== "number" || thread.posts.length === 0) return thread.posts.length;
+  // 最後の番号が既読の位置より小さいのは、次スレで番号が 1 に戻ったとき。戻ったあとのレスはすべて未読。
+  if (thread.posts[thread.posts.length - 1].no < seenNo) return thread.posts.length;
   return thread.posts.filter((p) => p.no > seenNo).length;
 }
 
@@ -19,11 +21,14 @@ export function unread(thread, seenNo) {
  * 起動している Agent が 1 つもないときは、覚えた値を書き換えない（一覧が一時的に空になることがある）。
  * @param {unknown} saved 覚えているキー
  * @param {string[]} keys 起動している Agent のキー（タブの順）
+ * @param {boolean} [pending] キーをまだ読めていない Agent がある。覚えたキーの Agent が終了したのか、
+ *   まだ読めていないだけなのかを区別できないので、この間は覚え直さない
  * @returns {{key: string | null, save: boolean}} save が true なら key を覚え直す
  */
-export function selectTab(saved, keys) {
-  if (keys.length === 0) return { key: null, save: false };
+export function selectTab(saved, keys, pending = false) {
   if (typeof saved === "string" && keys.includes(saved)) return { key: saved, save: false };
+  if (pending) return { key: typeof saved === "string" ? null : (keys[0] ?? null), save: false };
+  if (keys.length === 0) return { key: null, save: false };
   return { key: keys[0], save: true };
 }
 

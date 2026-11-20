@@ -131,6 +131,7 @@ export default class Nanj extends View {
     });
     // 値を比べるだけの軽い見回り。変化があったときだけ読み直して描き直す。
     cx.timer.every(POLL_MS, (cx) => {
+      this.forgetGone();
       this.housekeep();
       if (!this.wantsCatchUp()) return;
       cx.spawn(async (cx) => {
@@ -155,6 +156,18 @@ export default class Nanj extends View {
     return out;
   }
 
+  /** いなくなった端末の作成時刻を忘れる。同じアドレスが別の端末に使われたときに、古い時刻を使わないため。 */
+  forgetGone() {
+    const now = agents().map((a) => a.address);
+    if (now.length === 0) return; // 一覧が一時的に空になっただけかもしれないので、何も忘れない
+    for (const address of Object.keys(this.created)) if (!now.includes(address)) delete this.created[address];
+  }
+
+  /** キーをまだ読めていない Agent がある（または一覧が空）。この間は、タブの選択を覚え直さない。 */
+  pending() {
+    return agents().length === 0 || this.listAgents().some((a) => a.key === null);
+  }
+
   /** タブに出す Agent のキー（タブの順）。 */
   liveKeys() {
     return this.listAgents().filter((a) => a.key !== null).map((a) => a.key);
@@ -162,10 +175,8 @@ export default class Nanj extends View {
 
   /** 端末の作成時刻を覚える。agents() にはないので、端末ごとに 1 回だけ hc get で読む。読めなければ次にまた読む。 */
   async learnCreated() {
-    const now = agents().map((a) => a.address);
-    // いなくなった端末は忘れる。同じアドレスが別の端末に使われたときに、古い時刻を使わないため。
-    for (const address of Object.keys(this.created)) if (!now.includes(address)) delete this.created[address];
-    for (const address of now) {
+    this.forgetGone();
+    for (const address of agents().map((a) => a.address)) {
       if (address in this.created) continue;
       try {
         const r = await hc(["get", address, "--json"]);
@@ -198,7 +209,7 @@ export default class Nanj extends View {
         this.revN = rev.n;
         await this.engine.reload(null, now);
         // 引き継いだときは、手元のスレッドがどれも古いかもしれないので、すべて読み直す。
-        const stale = this.leader ? [...new Set([...Object.keys(this.engine.threads), ...keys])] : [rev.key, selectTab(shared("nanj.tab"), keys).key];
+        const stale = this.leader ? [...new Set([...Object.keys(this.engine.threads), ...keys])] : [rev.key, selectTab(shared("nanj.tab"), keys, this.pending()).key];
         for (const key of stale) if (typeof key === "string") await this.engine.reload(key, now);
       }
       await this.engine.ensure(keys, now);
@@ -220,7 +231,7 @@ export default class Nanj extends View {
       setShared("nanj.seen", { ...(shared("nanj.seen") ?? {}), ...this.engine.migrated });
       this.engine.migrated = null;
     }
-    const sel = selectTab(shared("nanj.tab"), this.liveKeys());
+    const sel = selectTab(shared("nanj.tab"), this.liveKeys(), this.pending());
     if (sel.save) setShared("nanj.tab", sel.key);
     const seen = markSeen(shared("nanj.seen"), sel.key, sel.key === null ? null : this.engine.threads[sel.key]);
     if (seen) setShared("nanj.seen", seen);
@@ -272,7 +283,7 @@ export default class Nanj extends View {
     const t = theme();
     const visible = this.listAgents();
     const liveAgents = visible.filter((a) => a.key !== null);
-    const selected = selectTab(shared("nanj.tab"), liveAgents.map((a) => a.key)).key;
+    const selected = selectTab(shared("nanj.tab"), liveAgents.map((a) => a.key), this.pending()).key;
     const tabs = buildTabs(liveAgents, agentNames(visible), this.engine.threads, shared("nanj.seen"), selected);
     const thread = selected === null ? null : (this.engine.threads[selected] ?? null);
     if (selected !== this.shownKey) {
@@ -349,7 +360,7 @@ export default class Nanj extends View {
       .child(h_flex().id("nanj-tabs").flex_none().h(TABS_PX).px(6).gap(2).items_center().overflow_x_scrollbar()
         .border_b_1().border_color(c.line).children(tabs.map(tab)))
       .child(v_flex().flex_none().px(8).py(6).gap(4).border_b_1().border_color(c.line)
-        .child(div().text_color(c.title).font_semibold().child((thread && thread.title) ?? "スレ立て待ち"))
+        .child(div().text_color(c.title).font_semibold().child(selected === null ? "読み込み中" : ((thread && thread.title) ?? "スレ立て待ち")))
         .child(h_flex().gap(6).items_center()
           .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(error ? c.title : c.meta)
             .child(error ?? (paused ? "停止中" : "実況中")))

@@ -277,6 +277,22 @@ describe("Agent ごとのスレッド", () => {
     expect(Object.keys(e.threads)).toEqual([K1]);
   });
 
+  it("生成の途中で次スレにしたら、レスは新しいスレッドに入り、次スレが取り消されない", async () => {
+    let release;
+    const { f, e } = await started();
+    await e.tick(0);
+    f.screens.t1 = "次の画面";
+    f.respond = () => new Promise((r) => { release = () => r(reply("あとから届いたレス")); });
+    const running = e.tick(90000);
+    await new Promise((r) => setTimeout(r, 0));
+    await e.rotate(K1, 91000);
+    release();
+    await running;
+    expect(e.threads[K1].posts.map((p) => [p.no, p.body])).toEqual([[1, "あとから届いたレス"]]);
+    expect(e.threads[K1].startedAt).toBe(91000);
+    expect(e.threads[K1].title).toBe("【実況】api スレ");
+  });
+
   it("rotate は、そのスレッドだけを同じ持ち主の空のスレッドにする", async () => {
     const { f, e } = await started(two());
     await e.tick(0);
@@ -469,6 +485,26 @@ describe("移行", () => {
     expect(f.log.generate[0].user).toContain("まだスレタイがない");
   });
 
+  it("Agent の一覧が空の間は移行しない", async () => {
+    const { f, e } = await started({ agents: [], legacy: legacy() });
+    await e.tick(100);
+    expect(f.files).toEqual({});
+    expect(f.archived).toBe(0);
+    f.agents = [agent("t1", "idle")];
+    await e.tick(200);
+    expect(JSON.parse(f.files["t1@1"]).posts.map((p) => p.no)).toEqual([1, 2, 5]);
+  });
+
+  it("名前を変えるだけのときも、保存されている一覧を使い続ける", async () => {
+    const kept = { key: "t7@1", address: "t7", name: "old", color: 4, lastPostAt: 50 };
+    const { f, e } = await started({ legacy: legacy(), index: null });
+    f.index = serializeIndex({ v: 1, threads: [kept] });
+    await e.tick(100);
+    expect(f.archived).toBe(1);
+    expect(deserializeIndex(f.index).threads.map((x) => x.key)).toEqual(["t7@1", K1]);
+    expect(e.threads[K1].color).toBe(5);
+  });
+
   it("元のファイルがなければ何もしない", async () => {
     const { f, e } = await started(idle);
     await e.tick(100);
@@ -495,6 +531,18 @@ describe("古いスレッド", () => {
     const { f, e } = await started(withIndex([entry("t6@1", NOW - 86400000)], { agents: [] }));
     await e.tick(NOW);
     expect(f.removed).toEqual([]);
+  });
+
+  it("Agent の一覧が空か、キーを読めていない Agent がある間は消さず、そろったら消す", async () => {
+    const { f, e } = await started(withIndex([entry("t5@1", 0)], { agents: [] }));
+    await e.tick(NOW);
+    expect(f.removed).toEqual([]);
+    f.agents = [agent("t1", "idle", "api", "1", null)];
+    await e.tick(NOW + 15000);
+    expect(f.removed).toEqual([]);
+    f.agents = [agent("t1", "idle")];
+    await e.tick(NOW + 30000);
+    expect(f.removed).toEqual(["t5@1"]);
   });
 
   it("削除は 1 時間に 1 回だけ試す", async () => {

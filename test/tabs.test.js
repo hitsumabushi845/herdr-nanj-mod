@@ -18,6 +18,9 @@ describe("unread", () => {
   it("連番でない番号（移行したスレッド）でも数えられる", () => {
     expect(unread(th("t1@1", [5, 9]), 5)).toBe(1);
   });
+  it("次スレで番号が 1 に戻ったら、戻ったあとのレスをすべて数える", () => {
+    expect(unread(th("t1@1", [1, 2]), 50)).toBe(2);
+  });
   it("スレッドがなければ 0", () => {
     expect(unread(null, 3)).toBe(0);
     expect(unread(undefined, undefined)).toBe(0);
@@ -35,6 +38,12 @@ describe("selectTab", () => {
   });
   it("起動している Agent がないときは、覚えた値を書き換えない", () => {
     expect(selectTab("b", [])).toEqual({ key: null, save: false });
+  });
+  it("キーをまだ読めていない Agent がある間は、覚えたキーがなくても替えない", () => {
+    expect(selectTab("c", ["a", "b"], true)).toEqual({ key: null, save: false });
+    expect(selectTab("b", ["a", "b"], true)).toEqual({ key: "b", save: false });
+    expect(selectTab(undefined, ["a"], true)).toEqual({ key: "a", save: false });
+    expect(selectTab("c", ["a", "b"], false)).toEqual({ key: "a", save: true });
   });
   it("並びが変わっても、選んだキーは替わらない", () => {
     expect(selectTab("b", ["c", "a", "b"])).toEqual({ key: "b", save: false });

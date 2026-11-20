@@ -215,14 +215,17 @@ export function createEngine(deps) {
         migrationDone = true;
         return true;
       }
-      if ((await deps.loadIndex()) !== null) {
-        // 前回、名前を変える前に止まった。スレッドと一覧はもう書いてある。
+      const indexText = await deps.loadIndex();
+      if (indexText !== null) {
+        // 前回、名前を変える前に止まった。スレッドと一覧はもう書いてある。その一覧を使い続ける。
+        engine.index = deserializeIndex(indexText);
         await deps.archiveLegacy();
         migrationDone = true;
         return true;
       }
       // 起動している端末のキーがそろうまで待つ。そろわないまま分けると、起動中の Agent のレスがタブに出ないスレッドに入る。
-      if (all.some((a) => a.key === null)) return false;
+      // Agent の一覧が空のときも待つ。一時的に空になっただけかもしれない。
+      if (all.length === 0 || all.some((a) => a.key === null)) return false;
       const liveKeys = {};
       for (const a of all) liveKeys[a.address] = a.key;
       const result = migrate(deserialize(legacyText, now), liveKeys, now);
@@ -282,7 +285,9 @@ export function createEngine(deps) {
     const live = all.filter((a) => a.key !== null);
     const names = agentNames(all);
 
-    if (lastPruneAt === null || now - lastPruneAt >= PRUNE_EVERY_MS) {
+    // 一覧が空か、キーを読めていない Agent がある間は消さない。起動中の Agent のスレッドを、起動していないものと取り違える。
+    const complete = all.length > 0 && all.every((a) => a.key !== null);
+    if (complete && (lastPruneAt === null || now - lastPruneAt >= PRUNE_EVERY_MS)) {
       lastPruneAt = now;
       await prune(live.map((a) => a.key), now);
     }
@@ -343,6 +348,7 @@ export function createEngine(deps) {
     });
     calls = record(calls, now);
     state = commit(state, trigger, now);
+    const before = engine.threads[key];
 
     let parsed = null;
     let reason = "応答を読めませんでした";
@@ -363,8 +369,11 @@ export function createEngine(deps) {
     failures = 0;
     if (parsed.posts.length === 0) return;
 
+    // 生成の間に次スレにされていたら、新しいスレッドに書く。古いスレッドに足すと、次スレが取り消される。
+    const current = engine.threads[key];
+    const base = current && current !== before ? { ...current, name } : thread;
     // 雑談は野次馬のレスだけにする
-    let next = append(thread, parsed.posts, chat ? null : { address: view.address, name }, now, deps.rand);
+    let next = append(base, parsed.posts, chat ? null : { address: view.address, name }, now, deps.rand);
     if (needTitle && parsed.title) next = setTitle(next, parsed.title, now);
     else if (next.title === null) next = setTitle(next, `【実況】${name} スレ`, now);
     engine.threads[key] = next;
