@@ -4,28 +4,47 @@ import { agentNames } from "./names.js";
 import { screenKey } from "./screen.js";
 import { canCall, record } from "./budget.js";
 import { initialState, observe, pick, commit, drop, workingSince } from "./triggers.js";
-import { newThread, append, nextNo, setTitle, serialize, deserialize } from "./thread.js";
+import {
+  newThread, append, nextNo, setTitle, serialize, deserialize, migrate,
+  emptyIndex, upsertIndex, removeFromIndex, nextColor, staleKeys, serializeIndex, deserializeIndex,
+} from "./thread.js";
 import { SYSTEM_PROMPT, RECENT_MAX, buildUserPrompt, parseResponse } from "./prompt.js";
 
 /** @typedef {import("./config.js").Config} Config */
 /** @typedef {import("./thread.js").Thread} Thread */
-/** @typedef {{address: string, status: "working" | "blocked" | "done" | "idle", space: string, space_name: string, tab_name: string}} AgentView */
+/** @typedef {import("./thread.js").Index} Index */
+/**
+ * @typedef {object} AgentView
+ * @property {string} address
+ * @property {"working" | "blocked" | "done" | "idle"} status
+ * @property {string} space
+ * @property {string} space_name
+ * @property {string} tab_name
+ * @property {string | null} key スレッドのキー。端末の作成時刻をまだ読めていなければ null
+ */
 /**
  * @typedef {object} Deps
  * @property {() => AgentView[]} listAgents
  * @property {(address: string) => Promise<string>} readScreen 読めなければ reject する
  * @property {(system: string, user: string) => Promise<string>} generate 失敗したら reject する
- * @property {() => Promise<string | null>} load
- * @property {(text: string) => Promise<void>} save
+ * @property {(key: string) => Promise<string | null>} loadThread
+ * @property {(key: string, text: string) => Promise<void>} saveThread
+ * @property {(key: string) => Promise<void>} removeThread
+ * @property {() => Promise<string | null>} loadIndex
+ * @property {(text: string) => Promise<void>} saveIndex
+ * @property {() => Promise<string | null>} loadLegacy 1 本にまとめていたころのスレッド（thread.json）
+ * @property {() => Promise<void>} archiveLegacy thread.json を残す名前に変える
  * @property {() => Config} config
  * @property {() => number} rand
- * @property {() => void} changed スレッドか状態が変わったときに呼ぶ
+ * @property {(key: string | null) => void} changed 変わったスレッドのキー。一覧や状態だけが変わったときは null
  */
 
 export const LEASE_MS = 45000;
 export const MAX_FAILURES = 3;
 /** スレタイがこれより古くなったら、次のレスと一緒に付け直す。 */
 export const TITLE_REFRESH_MS = 1800000;
+/** 古いスレッドを消す処理を走らせる間隔。 */
+export const PRUNE_EVERY_MS = 3600000;
 
 /**
  * 生成役のリースを自分が持てるか。リースがない、自分のもの、LEASE_MS 以上古いときに true。
@@ -72,28 +91,50 @@ export function createEngine(deps) {
   let calls = [];
   let failures = 0;
   let busy = false;
+  let migrationDone = false;
+  let lastPruneAt = null;
+  /** 保存された内容を読もうとしたキー。読み込みに失敗したキーは入れず、次にまた読む。 */
+  const loaded = new Set();
 
   const engine = {
-    /** @type {Thread} */
-    thread: newThread(0),
+    /** キーからスレッドへの対応。レスが 1 つ以上付いたスレッドと、保存から読んだスレッドだけが入る。 @type {Record<string, Thread>} */
+    threads: {},
+    /** @type {Index} */
+    index: emptyIndex(),
+    /** 移行した直後だけ、キーごとの最後のレス番号。呼び出し側が既読の位置に使い、読んだら null に戻す。 @type {Record<string, number> | null} */
+    migrated: null,
     paused: false,
     /** @type {string | null} */
     error: null,
 
     async init(now) {
-      engine.thread = newThread(now);
-      await engine.reload(now);
+      await engine.reload(null, now);
     },
 
-    /** 保存された内容を読み直す。生成役でないコピーが、他のコピーの書き込みを取り込むために使う。 */
-    async reload(now) {
-      let text;
-      try {
-        text = await deps.load();
-      } catch {
-        return; // 読めないときは手元のスレッドを残す。空で上書きしない。
+    /**
+     * 保存された内容を読み直す。key が null なら一覧、キーならそのスレッド。
+     * 読み込みに失敗したら手元の内容を残す。空で上書きしない。
+     */
+    async reload(key, now) {
+      if (key === null) {
+        try {
+          engine.index = deserializeIndex(await deps.loadIndex());
+        } catch {
+          // 手元の一覧を残す
+        }
+        return;
       }
-      engine.thread = deserialize(text, now);
+      await read(key, now);
+    },
+
+    /** まだ読んでいないキーのスレッドを読む。読んだものがあれば true。 */
+    async ensure(keys, now) {
+      let any = false;
+      for (const key of keys) {
+        if (loaded.has(key)) continue;
+        if (await read(key, now)) any = true;
+      }
+      return any;
     },
 
     setPaused(paused) {
@@ -104,10 +145,12 @@ export function createEngine(deps) {
       }
     },
 
-    /** 手動の次スレ。スレッドが替わるのは、利用者がこれを選んだときだけ。 */
-    async rotate(now) {
-      engine.thread = newThread(now);
-      await persist();
+    /** 手動の次スレ。そのスレッドだけを、同じ持ち主の空のスレッドにする。 */
+    async rotate(key, now) {
+      const t = engine.threads[key];
+      if (!t || t.key === null) return;
+      engine.threads[key] = newThread(now, { key: t.key, address: t.address, name: t.name, color: t.color });
+      await persist(key, now);
     },
 
     async tick(now) {
@@ -121,25 +164,133 @@ export function createEngine(deps) {
     },
   };
 
-  async function persist() {
+  /** スレッドを保存から読む。読めたら（なかった場合も含めて）true、読み込みに失敗したら false。 */
+  async function read(key, now) {
+    let text;
     try {
-      await deps.save(serialize(engine.thread));
-      if (!engine.paused) engine.error = null;
-    } catch (e) {
-      engine.error = `スレッドの保存に失敗しました: ${message(e)}`;
+      text = await deps.loadThread(key);
+    } catch {
+      loaded.delete(key);
+      return false;
     }
-    deps.changed();
+    loaded.add(key);
+    const t = text === null ? null : deserialize(text, now);
+    // ない、壊れている、別のキーのスレッドが入っているファイルは、ないものとして扱う
+    if (t !== null && t.key === key) engine.threads[key] = t;
+    else delete engine.threads[key];
+    return true;
+  }
+
+  /** スレッドのファイル、一覧の順に保存する。一覧だけ失敗しても、スレッドは残る。 */
+  async function persist(key, now) {
+    const thread = engine.threads[key];
+    let failed = null;
+    try {
+      await deps.saveThread(key, serialize(thread));
+      loaded.add(key);
+    } catch (e) {
+      failed = `スレッドの保存に失敗しました: ${message(e)}`;
+    }
+    if (failed === null) {
+      engine.index = upsertIndex(engine.index, thread, now);
+      try {
+        await deps.saveIndex(serializeIndex(engine.index));
+      } catch (e) {
+        failed = `スレッドの一覧の保存に失敗しました: ${message(e)}`;
+      }
+    }
+    if (failed !== null) engine.error = failed;
+    else if (!engine.paused) engine.error = null;
+    deps.changed(key);
+  }
+
+  /**
+   * 1 本にまとめていたころのスレッドを、端末ごとのファイルに分ける。1 回だけ行う。
+   * @returns {Promise<boolean>} 先へ進んでよければ true。待つ、または失敗したときは false で、次の tick でやり直す
+   */
+  async function migrateIfNeeded(all, now) {
+    try {
+      const legacyText = await deps.loadLegacy();
+      if (legacyText === null) {
+        migrationDone = true;
+        return true;
+      }
+      if ((await deps.loadIndex()) !== null) {
+        // 前回、名前を変える前に止まった。スレッドと一覧はもう書いてある。
+        await deps.archiveLegacy();
+        migrationDone = true;
+        return true;
+      }
+      // 起動している端末のキーがそろうまで待つ。そろわないまま分けると、起動中の Agent のレスがタブに出ないスレッドに入る。
+      if (all.some((a) => a.key === null)) return false;
+      const liveKeys = {};
+      for (const a of all) liveKeys[a.address] = a.key;
+      const result = migrate(deserialize(legacyText, now), liveKeys, now);
+      let index = emptyIndex();
+      for (const t of result.threads) {
+        await deps.saveThread(t.key, serialize(t));
+        index = upsertIndex(index, t, now);
+      }
+      await deps.saveIndex(serializeIndex(index));
+      await deps.archiveLegacy();
+      engine.index = index;
+      const migrated = {};
+      for (const t of result.threads) {
+        engine.threads[t.key] = t;
+        loaded.add(t.key);
+        migrated[t.key] = nextNo(t) - 1;
+      }
+      engine.migrated = migrated;
+      migrationDone = true;
+      if (!engine.paused) engine.error = null;
+      deps.changed(null);
+      return true;
+    } catch (e) {
+      engine.error = `スレッドの移行に失敗しました。次の見回りでやり直します: ${message(e)}`;
+      return false;
+    }
+  }
+
+  /** 起動しておらず、最後のレスから 7 日たったスレッドを消す。 */
+  async function prune(liveKeys, now) {
+    const keys = staleKeys(engine.index, liveKeys, now);
+    if (keys.length === 0) return;
+    for (const key of keys) {
+      try {
+        await deps.removeThread(key);
+      } catch {
+        continue; // 消せなかったものは一覧に残し、次にまた試す
+      }
+      engine.index = removeFromIndex(engine.index, key);
+      delete engine.threads[key];
+      loaded.delete(key);
+    }
+    try {
+      await deps.saveIndex(serializeIndex(engine.index));
+    } catch (e) {
+      engine.error = `スレッドの一覧の保存に失敗しました: ${message(e)}`;
+    }
+    deps.changed(null);
   }
 
   async function step(now) {
     const cfg = deps.config();
     const all = deps.listAgents().filter((a) => !cfg.exclude_spaces.includes(a.space_name));
+    if (!migrationDone && !(await migrateIfNeeded(all, now))) return;
+
+    // キーの付いていない Agent（端末の作成時刻をまだ読めていない）は、いないものとして扱う
+    const live = all.filter((a) => a.key !== null);
     const names = agentNames(all);
+
+    if (lastPruneAt === null || now - lastPruneAt >= PRUNE_EVERY_MS) {
+      lastPruneAt = now;
+      await prune(live.map((a) => a.key), now);
+    }
 
     // 観測。作業中の Agent だけ画面を読む。読めない Agent は一覧にないものとして扱う。
     const screens = {};
     const obs = [];
-    for (const a of all) {
+    for (const a of live) {
       if (a.status !== "working") {
         obs.push({ address: a.address, status: a.status, key: null });
         continue;
@@ -156,33 +307,39 @@ export function createEngine(deps) {
     const trigger = pick(state, now, cfg);
     if (!trigger || !canCall(calls, trigger.kind, now, cfg.max_calls_per_hour)) return;
 
-    let agent = null;
+    const view = live.find((a) => a.address === trigger.address);
+    const chat = trigger.kind === "chat";
     let screen = null;
-    if (trigger.kind !== "chat") {
-      const view = all.find((a) => a.address === trigger.address);
-      try {
-        if (!view) throw new Error("gone");
-        screen = screens[trigger.address] ?? (await deps.readScreen(trigger.address));
-      } catch {
-        state = drop(state, trigger);
-        return;
-      }
-      const since = workingSince(state, trigger.address);
-      agent = {
-        name: names[trigger.address], address: trigger.address, space: view.space_name, tab: view.tab_name,
-        status: view.status, workingForSec: since === null ? 0 : Math.floor((now - since) / 1000),
-      };
+    try {
+      if (!view) throw new Error("gone");
+      if (!chat) screen = screens[trigger.address] ?? (await deps.readScreen(trigger.address));
+    } catch {
+      state = drop(state, trigger);
+      return;
     }
+    const name = names[view.address];
+
+    // 書き込むのは、きっかけの対象の Agent のスレッドだけ。
+    // 保存された内容を読めないときは、新しいスレッドで上書きせず、次の tick でやり直す。
+    const key = view.key;
+    if (!loaded.has(key) && !(await read(key, now))) return;
+    let thread = engine.threads[key] ?? newThread(now, { key, address: view.address, name, color: nextColor(engine.index) });
+    if (thread.name !== name) thread = { ...thread, name };
+
+    const since = workingSince(state, view.address);
+    const agent = chat ? null : {
+      name, address: view.address, space: view.space_name, tab: view.tab_name,
+      status: view.status, workingForSec: since === null ? 0 : Math.floor((now - since) / 1000),
+    };
 
     // スレタイは、ないときと、付けてから TITLE_REFRESH_MS たったときに頼む。レスの生成に相乗りし、呼び出しは増やさない。
-    const { title, titleAt } = engine.thread;
-    const needTitle = title === null || now - (titleAt ?? engine.thread.startedAt) >= TITLE_REFRESH_MS;
+    const needTitle = thread.title === null || now - (thread.titleAt ?? thread.startedAt) >= TITLE_REFRESH_MS;
     const user = buildUserPrompt({
       kind: trigger.kind, agent, screen,
-      recent: engine.thread.posts.slice(-RECENT_MAX),
+      recent: thread.posts.slice(-RECENT_MAX),
       needTitle,
-      currentTitle: title,
-      nextNo: nextNo(engine.thread),
+      currentTitle: thread.title,
+      nextNo: nextNo(thread),
     });
     calls = record(calls, now);
     state = commit(state, trigger, now);
@@ -199,18 +356,19 @@ export function createEngine(deps) {
       if (failures >= MAX_FAILURES) {
         engine.paused = true;
         engine.error = `レスの生成に ${MAX_FAILURES} 回続けて失敗したので止めました: ${reason}`;
-        deps.changed();
+        deps.changed(null);
       }
       return;
     }
     failures = 0;
     if (parsed.posts.length === 0) return;
 
-    const next = append(engine.thread, parsed.posts, agent ? { address: agent.address, name: agent.name } : null, now, deps.rand);
-    if (needTitle && parsed.title) engine.thread = setTitle(next, parsed.title, now);
-    else if (next.title === null) engine.thread = setTitle(next, `【実況】${agent ? agent.name : "なんJ"} スレ`, now);
-    else engine.thread = next;
-    await persist();
+    // 雑談は野次馬のレスだけにする
+    let next = append(thread, parsed.posts, chat ? null : { address: view.address, name }, now, deps.rand);
+    if (needTitle && parsed.title) next = setTitle(next, parsed.title, now);
+    else if (next.title === null) next = setTitle(next, `【実況】${name} スレ`, now);
+    engine.threads[key] = next;
+    await persist(key, now);
   }
 
   return engine;
