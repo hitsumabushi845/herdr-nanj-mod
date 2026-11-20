@@ -158,7 +158,7 @@ export function createEngine(deps) {
 
     let agent = null;
     let screen = null;
-    if (trigger.address !== null) {
+    if (trigger.kind !== "chat") {
       const view = all.find((a) => a.address === trigger.address);
       try {
         if (!view) throw new Error("gone");

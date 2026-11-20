@@ -117,9 +117,33 @@ describe("雑談", () => {
     expect(pick(observe(s, [w("t1", "k1")], 539000), 539000, cfg)).toBeNull();
     s = commit(observe(s, [w("t1", "k1")], 540000), { kind: "wait", address: "t1" }, 540000);
     s = observe(s, [w("t1", "k1")], 600000);
-    expect(pick(s, 600000, cfg)).toEqual({ kind: "chat", address: null });
-    s = commit(s, { kind: "chat", address: null }, 600000);
+    expect(pick(s, 600000, cfg)).toEqual({ kind: "chat", address: "t1" });
+    s = commit(s, { kind: "chat", address: "t1" }, 600000);
     expect(pick(s, 600000, cfg)).toBeNull();
+  });
+  it("作業中の Agent のうち、最後のレスが古いほうのスレッドに書く", () => {
+    const c = { ...cfg, min_interval_sec: 30, chat_interval_min: 1 };
+    let s = observe(initialState(), [w("t1", "a"), w("t2", "a")], 0);
+    s = commit(s, progress("t1"), 0);
+    s = commit(s, progress("t2"), 30000);
+    s = observe(s, [w("t1", "a"), w("t2", "a")], 100000);
+    expect(pick(s, 100000, c)).toEqual({ kind: "chat", address: "t1" });
+  });
+  it("雑談を commit しても、その Agent のレスの間隔は延びない", () => {
+    const c = { ...cfg, min_interval_sec: 30, chat_interval_min: 1 };
+    let s = commit(observe(initialState(), [w("t1", "a")], 0), progress("t1"), 0);
+    s = observe(s, [w("t1", "a")], 100000);
+    const after = commit(s, { kind: "chat", address: "t1" }, 100000);
+    expect(after.agents.t1.lastPostAt).toBe(0);
+    expect(after.lastChatAt).toBe(100000);
+    expect(pick(after, 100000, c)).toBeNull();
+  });
+  it("作業中でない Agent のスレッドには書かない", () => {
+    const c = { ...cfg, chat_interval_min: 1 };
+    let s = observe(initialState(), [st("t1", "idle"), w("t2", "a")], 0);
+    s = commit(s, progress("t2"), 0);
+    s = observe(s, [st("t1", "idle"), w("t2", "a")], 100000);
+    expect(pick(s, 100000, c)).toEqual({ kind: "chat", address: "t2" });
   });
   it("作業中の Agent がなければ出ない", () => {
     const s = observe(observe(initialState(), [st("t1", "idle")], 0), [st("t1", "idle")], 6000000);

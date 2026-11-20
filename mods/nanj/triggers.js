@@ -3,7 +3,7 @@
 /** @typedef {import("./budget.js").Kind} Kind */
 /** @typedef {import("./config.js").Config} Config */
 /** @typedef {{address: string, status: "working" | "blocked" | "done" | "idle", key: string | null}} Obs */
-/** @typedef {{kind: Kind, address: string | null}} Trigger */
+/** @typedef {{kind: Kind, address: string}} Trigger 雑談の address は、書き込むスレッドの Agent */
 /**
  * @typedef {object} Rec Agent ごとの記録
  * @property {string} status
@@ -89,10 +89,14 @@ export function pick(state, now, cfg) {
   const minGap = cfg.min_interval_sec * 1000;
   let best = null;
   let bestAt = Infinity;
-  let anyWorking = false;
+  let chatTo = null; // 雑談の行き先: 作業中の Agent のうち、最後のレスがいちばん古いもの
+  let chatAt = Infinity;
   for (const [address, r] of Object.entries(state.agents)) {
     if (r.status !== "working") continue;
-    anyWorking = true;
+    if ((r.lastPostAt ?? -Infinity) < chatAt) {
+      chatTo = address;
+      chatAt = r.lastPostAt ?? -Infinity;
+    }
     if (r.lastPostAt !== null && now - r.lastPostAt < minGap) continue;
     let kind = null;
     if (r.key !== r.postedKey) kind = "progress";
@@ -105,8 +109,8 @@ export function pick(state, now, cfg) {
     }
   }
   if (best) return best;
-  if (anyWorking && cfg.chat_interval_min > 0 && state.lastChatAt !== null && now - state.lastChatAt >= cfg.chat_interval_min * 60000) {
-    return { kind: "chat", address: null };
+  if (chatTo !== null && cfg.chat_interval_min > 0 && state.lastChatAt !== null && now - state.lastChatAt >= cfg.chat_interval_min * 60000) {
+    return { kind: "chat", address: chatTo };
   }
   return null;
 }
