@@ -10,15 +10,41 @@ import { YAJIUMA_NAME, yajiumaId } from "./names.js";
  * @property {number | null} titleAt スレタイを付けた時刻。付け直す時期を決めるのに使う
  * @property {number} startedAt
  * @property {Post[]} posts
- * @property {Record<string, number>} colors
+ * @property {Record<string, number>} colors 1 本にまとめていたころの、端末ごとの色。移行で使う
+ * @property {string | null} key スレッドのキー（<端末のアドレス>@<端末の作成時刻>）
+ * @property {string | null} address 持ち主の端末のアドレス
+ * @property {string | null} name 持ち主の Agent の名前
+ * @property {number} color 持ち主の名前の色の番号
  */
+/** @typedef {{key: string, address: string, name: string, color: number}} Owner */
+/** @typedef {{key: string, address: string, name: string, color: number, lastPostAt: number}} IndexEntry */
+/** @typedef {{v: 1, threads: IndexEntry[]}} Index */
 
 export const MAX_POSTS = 1000;
 export const COLOR_SLOTS = 8;
+/** 起動していない Agent のスレッドを、最後のレスからこれだけたったら消す。 */
+export const PRUNE_AFTER_MS = 604800000;
 
-/** @param {number} now @returns {Thread} */
-export function newThread(now) {
-  return { v: 1, title: null, titleAt: null, startedAt: now, posts: [], colors: {} };
+/** スレッドのキー。アドレスが別の端末に使い回されても混ざらないよう、作成時刻を付ける。 */
+export function threadKey(address, createdMs) {
+  return `${address}@${createdMs}`;
+}
+
+/** スレッドを保存するファイルの名前。別のマシンの端末（machine/t7）の / を置き換える。 */
+export function threadFile(key) {
+  return key.replace(/\//g, "_") + ".json";
+}
+
+/**
+ * @param {number} now
+ * @param {Owner} [owner] 持ち主の Agent。なければ持ち主の欄は空にする
+ * @returns {Thread}
+ */
+export function newThread(now, owner) {
+  return {
+    v: 1, title: null, titleAt: null, startedAt: now, posts: [], colors: {},
+    key: owner?.key ?? null, address: owner?.address ?? null, name: owner?.name ?? null, color: owner?.color ?? 0,
+  };
 }
 
 /**
@@ -104,6 +130,7 @@ export function serialize(thread) {
 }
 
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+const optString = (v) => v === undefined || v === null || typeof v === "string";
 const validPost = (p) =>
   isObj(p) && typeof p.no === "number" && typeof p.name === "string" && typeof p.id === "string" &&
   (p.agent === null || typeof p.agent === "string") && typeof p.at === "number" && typeof p.body === "string";
@@ -121,14 +148,83 @@ export function deserialize(text, now) {
       isObj(t) && t.v === 1 && (t.title === null || typeof t.title === "string") && typeof t.startedAt === "number" &&
       (t.titleAt === undefined || t.titleAt === null || typeof t.titleAt === "number") &&
       Array.isArray(t.posts) && t.posts.every(validPost) && isObj(t.colors) &&
-      Object.values(t.colors).every((c) => typeof c === "number")
+      Object.values(t.colors).every((c) => typeof c === "number") &&
+      optString(t.key) && optString(t.address) && optString(t.name) && (t.color === undefined || typeof t.color === "number")
     ) {
       // 付けた時刻のない古い保存データは、スレッドの開始時刻で補う
       const titleAt = t.title === null ? null : (t.titleAt ?? t.startedAt);
-      return { v: 1, title: t.title, titleAt, startedAt: t.startedAt, posts: t.posts, colors: t.colors };
+      return {
+        v: 1, title: t.title, titleAt, startedAt: t.startedAt, posts: t.posts, colors: t.colors,
+        key: t.key ?? null, address: t.address ?? null, name: t.name ?? null, color: t.color ?? 0,
+      };
     }
   } catch {
     // 壊れたファイルは新しいスレッドとして扱う
   }
   return newThread(now);
+}
+
+/** @returns {Index} */
+export function emptyIndex() {
+  return { v: 1, threads: [] };
+}
+
+/**
+ * 一覧にスレッドを足す、または置き換える。持ち主のないスレッドは入れない。
+ * @param {Index} index
+ * @param {Thread} thread
+ * @param {number} now レスのないスレッドの lastPostAt に使う
+ * @returns {Index}
+ */
+export function upsertIndex(index, thread, now) {
+  if (thread.key === null || thread.address === null || thread.name === null) return index;
+  const last = thread.posts[thread.posts.length - 1];
+  const entry = { key: thread.key, address: thread.address, name: thread.name, color: thread.color, lastPostAt: last ? last.at : now };
+  const at = index.threads.findIndex((e) => e.key === thread.key);
+  const threads = at < 0 ? [...index.threads, entry] : index.threads.map((e, i) => (i === at ? entry : e));
+  return { v: 1, threads };
+}
+
+/** @param {Index} index @param {string} key @returns {Index} */
+export function removeFromIndex(index, key) {
+  return index.threads.some((e) => e.key === key) ? { v: 1, threads: index.threads.filter((e) => e.key !== key) } : index;
+}
+
+/** 次に作るスレッドの色の番号。作った順に COLOR_SLOTS 色を回す。 @param {Index} index */
+export function nextColor(index) {
+  if (index.threads.length === 0) return 0;
+  return (Math.max(...index.threads.map((e) => e.color)) + 1) % COLOR_SLOTS;
+}
+
+/**
+ * 消してよいスレッドのキー。起動しておらず、最後のレスから PRUNE_AFTER_MS たったものだけ。
+ * 起動していないことだけでは消さない（Agent の一覧が一時的に空になることがある）。
+ * @param {Index} index
+ * @param {string[]} liveKeys
+ * @param {number} now
+ */
+export function staleKeys(index, liveKeys, now) {
+  return index.threads.filter((e) => !liveKeys.includes(e.key) && now - e.lastPostAt >= PRUNE_AFTER_MS).map((e) => e.key);
+}
+
+/** @param {Index} index */
+export function serializeIndex(index) {
+  return JSON.stringify(index);
+}
+
+const validEntry = (e) =>
+  isObj(e) && typeof e.key === "string" && typeof e.address === "string" && typeof e.name === "string" &&
+  typeof e.color === "number" && typeof e.lastPostAt === "number";
+
+/** @param {string | null} text @returns {Index} 読めなければ空の一覧 */
+export function deserializeIndex(text) {
+  try {
+    const x = text == null ? null : JSON.parse(text);
+    if (isObj(x) && x.v === 1 && Array.isArray(x.threads) && x.threads.every(validEntry)) {
+      return { v: 1, threads: x.threads.map((e) => ({ key: e.key, address: e.address, name: e.name, color: e.color, lastPostAt: e.lastPostAt })) };
+    }
+  } catch {
+    // 壊れた一覧は空として扱う。次の保存で作り直される
+  }
+  return emptyIndex();
 }

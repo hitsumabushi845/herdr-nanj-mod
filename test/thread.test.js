@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { YAJIUMA_NAME } from "../mods/nanj/names.js";
 import {
-  newThread, append, nextNo, setTitle, stamp, shortStamp, segments, serialize, deserialize, MAX_POSTS, COLOR_SLOTS,
+  newThread, append, nextNo, setTitle, stamp, threadKey, threadFile, emptyIndex, upsertIndex, removeFromIndex, nextColor,
+  staleKeys, serializeIndex, deserializeIndex, PRUNE_AFTER_MS, serialize as ser, shortStamp, segments, serialize, deserialize, MAX_POSTS, COLOR_SLOTS,
 } from "../mods/nanj/thread.js";
 
 const api = { address: "t17", name: "api" };
@@ -106,5 +107,77 @@ describe("保存の形", () => {
     expect(deserialize('{"v":2,"posts":"x"}', 9)).toEqual(newThread(9));
     expect(deserialize('{"v":1,"title":null,"startedAt":1,"posts":[{"no":"x"}],"colors":{}}', 9)).toEqual(newThread(9));
     expect(deserialize('{"v":1,"title":3,"startedAt":1,"posts":[],"colors":[]}', 9)).toEqual(newThread(9));
+  });
+});
+
+describe("キーと持ち主", () => {
+  const owner = { key: "t16@5", address: "t16", name: "api", color: 3 };
+  it("キーは端末のアドレスと作成時刻から作る", () => {
+    expect(threadKey("t16", 1700000000000)).toBe("t16@1700000000000");
+  });
+  it("ファイルの名前では / を _ に置き換える", () => {
+    expect(threadFile("vps/t7@5")).toBe("vps_t7@5.json");
+    expect(threadFile("t16@5")).toBe("t16@5.json");
+  });
+  it("持ち主を付けてスレッドを作れる", () => {
+    expect(newThread(1, owner)).toMatchObject({ key: "t16@5", address: "t16", name: "api", color: 3, posts: [] });
+    expect(newThread(1)).toMatchObject({ key: null, address: null, name: null, color: 0 });
+  });
+  it("持ち主の欄を保存して読み戻せる", () => {
+    expect(deserialize(ser(newThread(1, owner)), 9)).toEqual(newThread(1, owner));
+  });
+  it("持ち主の欄のない古い保存データは null と 0 で読む", () => {
+    expect(deserialize('{"v":1,"title":null,"startedAt":5,"posts":[],"colors":{}}', 9)).toMatchObject({ key: null, address: null, name: null, color: 0 });
+  });
+  it("持ち主の欄の型が違えば新しいスレッドにする", () => {
+    expect(deserialize('{"v":1,"title":null,"startedAt":5,"posts":[],"colors":{},"key":3}', 9)).toEqual(newThread(9));
+    expect(deserialize('{"v":1,"title":null,"startedAt":5,"posts":[],"colors":{},"color":"red"}', 9)).toEqual(newThread(9));
+  });
+});
+
+describe("一覧", () => {
+  const owner = { key: "t16@5", address: "t16", name: "api", color: 3 };
+  const t = append(newThread(1, owner), [{ who: "agent", body: "a" }], { address: "t16", name: "api" }, 50, zero);
+  const ix = upsertIndex(emptyIndex(), t, 60);
+  it("スレッドを足すと、最後のレスの時刻と一緒に入る", () => {
+    expect(ix.threads).toEqual([{ key: "t16@5", address: "t16", name: "api", color: 3, lastPostAt: 50 }]);
+  });
+  it("レスのないスレッドは今の時刻で入る", () => {
+    expect(upsertIndex(emptyIndex(), newThread(1, owner), 60).threads[0].lastPostAt).toBe(60);
+  });
+  it("同じキーは置き換え、名前が変わっていれば新しい名前にする", () => {
+    const again = upsertIndex(ix, { ...t, name: "api/2" }, 70);
+    expect(again.threads).toHaveLength(1);
+    expect(again.threads[0].name).toBe("api/2");
+  });
+  it("持ち主のないスレッドは入れない", () => {
+    expect(upsertIndex(ix, newThread(1), 70)).toEqual(ix);
+  });
+  it("色は作った順に 8 色を回す", () => {
+    expect(nextColor(emptyIndex())).toBe(0);
+    expect(nextColor(ix)).toBe(4);
+    expect(nextColor({ v: 1, threads: [{ ...ix.threads[0], color: 7 }] })).toBe(0);
+  });
+  it("キーで外せる", () => {
+    expect(removeFromIndex(ix, "t16@5").threads).toEqual([]);
+    expect(removeFromIndex(ix, "none")).toEqual(ix);
+  });
+  it("保存して読み戻せる。壊れていれば空にする", () => {
+    expect(deserializeIndex(serializeIndex(ix))).toEqual(ix);
+    for (const bad of [null, "{壊れた", '{"v":2}', '{"v":1,"threads":[{"key":1}]}', "[]"]) expect(deserializeIndex(bad)).toEqual(emptyIndex());
+  });
+  it("元の一覧を変えない", () => {
+    upsertIndex(ix, { ...t, name: "x" }, 1);
+    expect(ix.threads[0].name).toBe("api");
+  });
+});
+
+describe("staleKeys", () => {
+  const old = { key: "t1@1", address: "t1", name: "a", color: 0, lastPostAt: 0 };
+  it("起動しておらず、最後のレスから 7 日たったものだけ返す", () => {
+    expect(PRUNE_AFTER_MS).toBe(604800000);
+    expect(staleKeys({ v: 1, threads: [old] }, [], PRUNE_AFTER_MS)).toEqual(["t1@1"]);
+    expect(staleKeys({ v: 1, threads: [old] }, [], PRUNE_AFTER_MS - 1)).toEqual([]);
+    expect(staleKeys({ v: 1, threads: [old] }, ["t1@1"], PRUNE_AFTER_MS * 2)).toEqual([]);
   });
 });
